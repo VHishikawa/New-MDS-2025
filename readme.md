@@ -51,12 +51,12 @@ Para permitir a comunicação do Spark e Airflow com o Data Lake (MinIO/S3), alg
 
 Este arquivo contém a distribuição completa do Spark que será usada pelos workers.
 
-  * **Arquivo:** `spark-3.5.1-bin-hadoop3.tgz`
+  * **Arquivo:** `spark-3.5.6-bin-hadoop3.tgz`
   * **Destino:** `airflow_service/conf/`
-  * **Link para Download:** [**spark-3.5.1-bin-hadoop3.tgz**](https://www.google.com/url?sa=E&source=gmail&q=https://archive.apache.org/dist/spark/spark-3.5.1/spark-3.5.1-bin-hadoop3.tgz)
+  * **Link para Download:** [**spark-3.5.6-bin-hadoop3.tgz**](https://www.google.com/url?sa=E&source=gmail&q=https://archive.apache.org/dist/spark/spark-3.5.6/spark-3.5.6-bin-hadoop3.tgz)
   * **Comando Sugerido:**
     ```bash
-    curl -L -o airflow_service/conf/spark-3.5.1-bin-hadoop3.tgz https://archive.apache.org/dist/spark/spark-3.5.1/spark-3.5.1-bin-hadoop3.tgz
+    curl -L -o airflow_service/conf/spark-3.5.6-bin-hadoop3.tgz https://archive.apache.org/dist/spark/spark-3.5.6/spark-3.5.6-bin-hadoop3.tgz
     ```
 
 #### 2\. JARS de Conectividade com S3 (Hadoop/AWS)
