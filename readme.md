@@ -16,8 +16,8 @@ Ambiente completo e automatizado para estudos e desenvolvimento de uma plataform
 #### Em um terminal (bash, zsh, etc.), realize o clone do projeto.
 
 ```bash
-git clone https://github.com/VHishikawa/mds-new.git
-cd mds-new
+git clone https://github.com/VHishikawa/New-MDS-2025.git
+cd New-MDS-2025
 ```
 
 *Após o clone, entre no diretório criado.*
