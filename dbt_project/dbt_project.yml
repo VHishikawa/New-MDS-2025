@@ -1,0 +1,23 @@
+name: 'minha_plataforma_dbt'
+version: '1.0.0'
+config-version: 2
+
+# Este nome de perfil será usado no próximo passo
+profile: 'minha_plataforma_profile'
+
+# Define onde o dbt procurará por cada tipo de arquivo
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# Configuração padrão para todos os modelos neste projeto
+models:
+  minha_plataforma_dbt:
+    +materialized: table

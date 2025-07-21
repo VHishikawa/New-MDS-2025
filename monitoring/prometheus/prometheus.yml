@@ -1,0 +1,66 @@
+global:
+  scrape_interval: 30s # Aumentando um pouco o intervalo para não sobrecarregar
+  evaluation_interval: 30s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+
+  - job_name: 'minio'
+    metrics_path: /minio/v2/metrics/cluster
+    static_configs:
+      - targets: ['minio:9000']
+
+  - job_name: 'nifi'
+    metrics_path: /nifi-api/metrics/prometheus
+    static_configs:
+      - targets: ['nifi:8181']
+
+  - job_name: 'openmetadata-mysql'
+    static_configs:
+      - targets: ['mysqld-exporter:9104']
+  
+  - job_name: 'openmetadata-elasticsearch'
+    metrics_path: /
+    static_configs:
+      - targets: ['openmetadata_elasticsearch:9201'] # Nota: Usando a porta do host, idealmente seria a interna
+
+  - job_name: 'openmetadata-server'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['openmetadata-server:8586'] # Porta de admin do OpenMetadata
+
+  #- job_name: 'kafka-broker'
+    # ATENÇÃO: Requer que o JMX Exporter esteja configurado no Kafka.
+    # Exemplo, se o JMX estiver na porta 9094.
+  #  static_configs:
+  #    - targets: ['kafka-broker:9094']
+
+  - job_name: 'flink'
+    static_configs:
+      - targets: ['flink-jobmanager:9249', 'flink-taskmanager:9249']
+
+  - job_name: 'airflow'
+    # ATENÇÃO: Requer que o "apache-airflow-providers-prometheus" esteja instalado
+    # e configurado no Airflow para expor métricas, geralmente na porta 8081.
+    static_configs:
+      - targets: ['airflow_webserver:8081']
+
+  - job_name: 'jenkins'
+    # ATENÇÃO: Requer a instalação do plugin "Prometheus metrics" no Jenkins.
+    metrics_path: /prometheus/
+    static_configs:
+      - targets: ['jenkins:8085'] # Usando a porta interna do Jenkins no docker

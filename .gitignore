@@ -1,0 +1,74 @@
+# ######################################################################
+# Arquivo .gitignore para o projeto de Engenharia de Dados
+# ######################################################################
+
+# Ignora arquivos de ambiente e variáveis
+# Arquivos .env geralmente contêm informações sensíveis como senhas e chaves de API.
+# É recomendado versionar um arquivo de exemplo (ex: .env.example) em vez do arquivo real.
+.env
+.env.*
+!/.env.example
+
+# Ignora arquivos de configuração específicos do ambiente local
+# O profiles.yml do dbt contém credenciais de banco de dados e deve ser ignorado.
+# Recomenda-se manter um arquivo de exemplo.
+/airflow_service/dbt/profiles.yml
+
+# O data-sources.json do Cloudbeaver pode conter informações de conexão.
+/cloudbeaver-conf/data-sources.json
+
+# Ignora diretórios de logs
+# Logs são gerados em tempo de execução e não devem ser versionados.
+/airflow_service/logs/
+*.log
+
+# Ignora dados e volumes de banco de dados
+# O diretório 'data' geralmente armazena dados temporários ou de teste.
+/airflow_service/data/
+/docker-volume/
+
+# Ignora arquivos e diretórios do HDFS
+# Os dados do HDFS (namenode e datanode) são dados de tempo de execução.
+/hadoop/hdfs/
+
+# Ignora eventos do Spark
+# Eventos e logs gerados pelas aplicações Spark.
+/spark_service/events/
+
+
+
+# Ignora diretórios de bibliotecas e jars do Hadoop e Hive
+/airflow_service/conf/hadoop_jars/
+/airflow_service/conf/*.tgz
+
+
+# Ignora arquivos de cache e compilados do Python
+# O __pycache__ contém bytecode que é gerado automaticamente pelo interpretador Python.
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignora artefatos de compilação do dbt
+# O diretório 'target' é gerado pelo dbt durante a execução e contém os modelos compilados e outros artefatos.
+/dbt_project/target/
+
+# Ignora arquivos temporários e de sistema
+# Arquivos comuns de sistemas operacionais e editores.
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Ignora diretórios de configuração de IDEs
+# Configurações específicas do ambiente de desenvolvimento local.
+.idea/
+.vscode/
+.history/
+*.swp
+*.swo
+
+# Ignora notebooks Jupyter e checkpoints
+# Opcional: descomente a linha abaixo se não quiser versionar os notebooks.
+# *.ipynb
+.ipynb_checkpoints
+

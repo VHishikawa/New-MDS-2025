@@ -1,0 +1,69 @@
+<configuration>
+
+  <property>
+    <name>javax.jdo.option.ConnectionURL</name>
+    <value>jdbc:postgresql://postgres_db:5432/metastore_db</value>
+    <description>JDBC connect string for a JDBC metastore</description>
+  </property>
+
+  <property>
+    <name>javax.jdo.option.ConnectionDriverName</name>
+    <value>org.postgresql.Driver</value>
+    <description>Driver class name for a JDBC metastore</description>
+  </property>
+
+  <property>
+    <name>javax.jdo.option.ConnectionUserName</name>
+    <value>airflow</value>
+    <description>Username to use against metastore database</description>
+  </property>
+
+  <property>
+    <name>javax.jdo.option.ConnectionPassword</name>
+    <value>airflow</value>
+    <description>Password to use against metastore database</description>
+  </property>
+
+  <property>
+    <name>datanucleus.autoCreateSchema</name>
+    <value>true</value>
+    <description>Creates schema automatically if not exists</description>
+  </property>
+
+  <property>
+    <name>hive.metastore.schema.verification</name>
+    <value>false</value>
+    <description>Disable schema verification to allow schematool to manage it</description>
+  </property>
+
+  <property>
+    <name>fs.s3a.endpoint</name>
+    <value>http://minio:9000</value>
+    <description>O endpoint para o seu serviço S3-compatível (Minio).</description>
+  </property>
+
+  <property>
+    <name>fs.s3a.access.key</name>
+    <value>datalake</value>
+    <description>A chave de acesso para o Minio.</description>
+  </property>
+
+  <property>
+    <name>fs.s3a.secret.key</name>
+    <value>datalake</value>
+    <description>A chave secreta para o Minio.</description>
+  </property>
+
+  <property>
+    <name>fs.s3a.path.style.access</name>
+    <value>true</value>
+    <description>Necessário para Minio e outros sistemas S3 que não usam subdomínios.</description>
+  </property>
+
+  <property>
+    <name>fs.s3a.impl</name>
+    <value>org.apache.hadoop.fs.s3a.S3AFileSystem</value>
+    <description>Define a implementação do FileSystem para S3A.</description>
+  </property>
+
+</configuration>

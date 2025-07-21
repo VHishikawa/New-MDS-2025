@@ -1,0 +1,1261 @@
+# new_mds/docker-compose.yml
+# Arquivo final, revisado, corrigido e otimizado.
+version: '3.8'
+
+services:
+
+  # -----------------------------------------------------------------------------------
+  #  CAMADA DE ARMAZENAMENTO E CACHE (Storage, Databases & Cache)
+  # -----------------------------------------------------------------------------------
+
+  postgres:
+    image: postgres:13
+    container_name: postgres_db
+    hostname: postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow # Esta senha será usada para autenticação
+      POSTGRES_DB: airflow
+    volumes:
+      # Usamos o novo nome de volume para garantir que está limpo
+      - postgres_data_v2:/var/lib/postgresql/data
+      - ./postgres-init/init-postgres.sh:/docker-entrypoint-initdb.d/init-postgres.sh
+      - ./scripts:/scripts
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+    networks:
+      - mds_network
+
+  redis:
+    image: redis:6.2.7
+    container_name: redis_cache
+    hostname: redis
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - mds_network
+
+  # docker-compose.yml
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio_init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      chmod +x /scripts/init-minio.sh &&
+      /scripts/init-minio.sh
+      "
+    volumes:
+      # CAMINHO AJUSTADO para refletir a nova pasta 'minio_init'
+      - ./minio_init/init-minio.sh:/scripts/init-minio.sh
+    networks:
+      - mds_network
+
+  minio:
+    image: minio/minio:RELEASE.2024-03-21T23-13-43Z
+    container_name: minio_storage
+    hostname: minio
+    ports:
+      - "9000:9000" # Porta da API
+      - "9001:9001" # Porta do Console (UI)
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: minioadmin
+      # Para compatibilidade com as chaves que você pediu
+      MINIO_ACCESS_KEY: datalake
+      MINIO_SECRET_KEY: datalake
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data # Volume para persistir os dados do MinIO
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      start_period: 240s
+      retries: 3
+    networks:
+      - mds_network
+
+  neo4j_db:
+    image: neo4j:5 # Utiliza a série 5, que é a versão principal mais recente e estável.
+    container_name: neo4j_db
+    hostname: neo4j
+    ports:
+      - "7474:7474" # Porta da UI Web do Neo4j.
+      - "7687:7687" # Porta do protocolo Bolt para conexão de drivers.
+    environment:
+      # A imagem oficial do Neo4j espera a autenticação no formato 'usuário/senha'.
+      # O usuário padrão e obrigatório é 'neo4j'.
+      NEO4J_AUTH: neo4j/admin123
+    volumes:
+      - neo4j_data:/data # Volume para persistir os dados do grafo.
+      - neo4j_logs:/logs # Volume para os logs.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:7474 || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 240s
+    networks:
+      - mds_network
+
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    hostname: mongo
+    ports:
+      - "40017:27017" # Porta padrão do MongoDB
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mongoadmin
+      MONGO_INITDB_ROOT_PASSWORD: mongopassword
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 240s
+    networks:
+      - mds_network
+
+  # -----------------------------------------------------------------------------------
+  #  CAMADA DE ORQUESTRAÇÃO E PROCESSAMENTO (Orchestration & Processing)
+  # -----------------------------------------------------------------------------------
+
+  airflow_init:
+    build:
+      context: .
+      dockerfile: ./airflow_service/conf/Dockerfile
+    container_name: airflow_init
+    # Adicionando '|| true' para que a criação do usuário não falhe se já existir
+    entrypoint: /bin/bash -c "airflow db migrate && airflow users create --username airflow --password airflow --firstname Airflow --lastname User --role Admin --email airflow@example.com || true"
+    environment:
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres_db:5432/airflow
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres_db:5432/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://redis_cache:6379/0
+      AIRFLOW__CORE__LOGGING_LEVEL: INFO
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      SPARK_HOME: /opt/spark
+      SPARK_CONF_DIR: /tmp/spark_conf
+      SPARK_LOCAL_DIRS: /tmp/spark-temp
+      # Adicionando variáveis para conexão com MinIO
+      AWS_ACCESS_KEY_ID: datalake
+      AWS_SECRET_ACCESS_KEY: datalake
+      AWS_ENDPOINT_URL: http://minio:9000
+      # Conexões automatizadas para Spark e MinIO
+      AIRFLOW_CONNECTIONS: '{"spark_master_conn": "spark://spark-master:7077", "minio_s3_conn": "s3://datalake:datalake@minio:9000?endpoint_url=http%3A%2F%2Fminio%3A9000&region_name=us-east-1&s3_signature_version=s3v4"}'
+    volumes:
+      - ./airflow_service/dags:/opt/airflow/dags
+      - ./airflow_service/logs:/opt/airflow/logs
+      - ./airflow_service/plugins:/opt/airflow/plugins
+      - ./airflow_service/data:/opt/airflow/data
+      - ./airflow_service/scripts:/opt/airflow/scripts
+      - ./spark_service/events:/opt/spark-events
+      - ./spark_service/conf/spark-defaults.conf:/tmp/spark_conf/spark-defaults.conf
+      # --- VOLUMES PARA O DBT ---
+      - ./dbt_project:/opt/airflow/dbt_project
+      - ./airflow_service/dbt/profiles.yml:/home/airflow/.dbt/profiles.yml
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+    networks:
+      - mds_network
+
+  airflow_webserver:
+    build:
+      context: .
+      dockerfile: ./airflow_service/conf/Dockerfile
+    container_name: airflow_webserver
+    command: ["python", "-m", "airflow", "webserver"] # ALTERADO: Usando python -m airflow
+    ports:
+      - "18080:8080"
+    environment:
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres_db:5432/airflow
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres_db:5432/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://redis_cache:6379/0
+      AIRFLOW__CORE__LOGGING_LEVEL: INFO
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__WEBSERVER__RBAC: "True"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
+      AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: 5
+      AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: 20
+      AIRFLOW__SMTP__SMTP_HOST: smtp.gmail.com
+      #AIRFLOW__SMTP__SMTP_USER: 
+      #AIRFLOW__SMTP__SMTP_PASSWORD:
+      AIRFLOW__SMTP__SMTP_PORT: 587
+      AIRFLOW__SMTP__MAIL_FROM: Airflow
+      SPARK_HOME: /opt/spark
+      SPARK_CONF_DIR: /tmp/spark_conf
+      SPARK_LOCAL_DIRS: /tmp/spark-temp
+      # Adicionando variáveis para conexão com MinIO
+      AWS_ACCESS_KEY_ID: datalake
+      AWS_SECRET_ACCESS_KEY: datalake
+      AWS_ENDPOINT_URL: http://minio:9000
+      AIRFLOW_CONN_SPARK_MASTER_CONN: "spark://spark-master:7077" # Mantido para compatibilidade, mas o AIRFLOW_CONNECTIONS é o principal
+      # Conexões automatizadas para Spark e MinIO
+      AIRFLOW_CONNECTIONS: '{"spark_master_conn": "spark://spark-master:7077", "minio_s3_conn": "s3://datalake:datalake@minio:9000?endpoint_url=http%3A%2F%2Fminio%3A9000&region_name=us-east-1&s3_signature_version=s3v4"}'
+    volumes:
+      - ./airflow_service/dags:/opt/airflow/dags
+      - ./airflow_service/logs:/opt/airflow/logs
+      - ./airflow_service/plugins:/opt/airflow/plugins
+      - ./airflow_service/data:/opt/airflow/data
+      - ./airflow_service/scripts:/opt/airflow/scripts
+      - ./spark_service/events:/opt/spark-events
+      - ./spark_service/conf/spark-defaults.conf:/tmp/spark_conf/spark-defaults.conf
+      - ./spark_service/conf/log4j2.properties:/tmp/spark_conf/log4j2.properties
+      # --- VOLUMES PARA O DBT ---
+      - ./dbt_project:/opt/airflow/dbt_project
+      - ./airflow_service/dbt/profiles.yml:/home/airflow/.dbt/profiles.yml
+    depends_on:
+      airflow_init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_started
+    networks:
+      - mds_network
+
+  airflow_scheduler:
+    build:
+      context: .
+      dockerfile: ./airflow_service/conf/Dockerfile
+    container_name: airflow_scheduler
+    command: ["python", "-m", "airflow", "scheduler"] # ALTERADO: Usando python -m airflow
+    environment:
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres_db:5432/airflow
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres_db:5432/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://redis_cache:6379/0
+      AIRFLOW__CORE__LOGGING_LEVEL: INFO
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: 5
+      AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: 20
+      AIRFLOW__SMTP__SMTP_HOST: smtp.gmail.com
+      #AIRFLOW__SMTP__SMTP_USER: 
+      #AIRFLOW__SMTP__SMTP_PASSWORD:
+      AIRFLOW__SMTP__SMTP_PORT: 587
+      AIRFLOW__SMTP__MAIL_FROM: Airflow
+      SPARK_HOME: /opt/spark
+      SPARK_CONF_DIR: /tmp/spark_conf
+      SPARK_LOCAL_DIRS: /tmp/spark-temp
+      # Adicionando variáveis para conexão com MinIO
+      AWS_ACCESS_KEY_ID: datalake
+      AWS_SECRET_ACCESS_KEY: datalake
+      AWS_ENDPOINT_URL: http://minio:9000
+      # Conexões automatizadas para Spark e MinIO
+      AIRFLOW_CONNECTIONS: '{"spark_master_conn": "spark://spark-master:7077", "minio_s3_conn": "s3://datalake:datalake@minio:9000?endpoint_url=http%3A%2F%2Fminio%3A9000&region_name=us-east-1&s3_signature_version=s3v4"}'
+    volumes:
+      - ./airflow_service/dags:/opt/airflow/dags
+      - ./airflow_service/logs:/opt/airflow/logs
+      - ./airflow_service/plugins:/opt/airflow/plugins
+      - ./airflow_service/data:/opt/airflow/data
+      - ./airflow_service/scripts:/opt/airflow/scripts
+      - ./spark_service/events:/opt/spark-events
+      - ./spark_service/conf/spark-defaults.conf:/tmp/spark_conf/spark-defaults.conf
+      # --- VOLUMES PARA O DBT ---
+      - ./dbt_project:/opt/airflow/dbt_project
+      - ./airflow_service/dbt/profiles.yml:/home/airflow/.dbt/profiles.yml
+    depends_on:
+      airflow_init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_started
+    networks:
+      - mds_network
+
+  airflow_worker:
+    build:
+      context: .
+      dockerfile: ./airflow_service/conf/Dockerfile
+    #container_name: airflow_worker
+    command: ["python", "-m", "airflow", "celery", "worker"] # ALTERADO: Usando python -m airflow
+    environment:
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres_db:5432/airflow
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres_db:5432/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://redis_cache:6379/0
+      AIRFLOW__CORE__LOGGING_LEVEL: INFO
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      SPARK_HOME: /opt/spark
+      SPARK_CONF_DIR: /tmp/spark_conf
+      SPARK_LOCAL_DIRS: /tmp/spark-temp
+      # Adicionando variáveis para conexão com MinIO
+      AWS_ACCESS_KEY_ID: datalake
+      AWS_SECRET_ACCESS_KEY: datalake
+      AWS_ENDPOINT_URL: http://minio:9000
+      # Conexões automatizadas para Spark e MinIO
+      AIRFLOW_CONNECTIONS: '{"spark_master_conn": "spark://spark-master:7077", "minio_s3_conn": "s3://datalake:datalake@minio:9000?endpoint_url=http%3A%2F%2Fminio%3A9000&region_name=us-east-1&s3_signature_version=s3v4"}'
+    volumes:
+      - ./airflow_service/dags:/opt/airflow/dags
+      - ./airflow_service/logs:/opt/airflow/logs
+      - ./airflow_service/plugins:/opt/airflow/plugins
+      - ./airflow_service/data:/opt/airflow/data
+      - ./airflow_service/scripts:/opt/airflow/scripts
+      - ./spark_service/events:/opt/spark-events
+      - ./spark_service/conf/spark-defaults.conf:/tmp/spark_conf/spark-defaults.conf
+      - ./spark_service/conf/log4j2.properties:/tmp/spark_conf/log4j2.properties
+      # --- VOLUMES PARA O DBT ---
+      - ./dbt_project:/opt/airflow/dbt_project
+      - ./airflow_service/dbt/profiles.yml:/home/airflow/.dbt/profiles.yml
+    depends_on:
+      airflow_init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_started
+    networks:
+      - mds_network
+
+  airflow_triggerer:
+    build:
+      context: .
+      dockerfile: ./airflow_service/conf/Dockerfile
+    container_name: airflow_triggerer
+    command: ["python", "-m", "airflow", "triggerer"] # ALTERADO: Usando python -m airflow
+    environment:
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres_db:5432/airflow
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres_db:5432/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://redis_cache:6379/0
+      AIRFLOW__CORE__LOGGING_LEVEL: INFO
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      SPARK_HOME: /opt/spark
+      SPARK_CONF_DIR: /tmp/spark_conf
+      SPARK_LOCAL_DIRS: /tmp/spark-temp
+      # Adicionando variáveis para conexão com MinIO
+      AWS_ACCESS_KEY_ID: datalake
+      AWS_SECRET_ACCESS_KEY: datalake
+      AWS_ENDPOINT_URL: http://minio:9000
+      # Conexões automatizadas para Spark e MinIO
+      AIRFLOW_CONNECTIONS: '{"spark_master_conn": "spark://spark-master:7077", "minio_s3_conn": "s3://datalake:datalake@minio:9000?endpoint_url=http%3A%2F%2Fminio%3A9000&region_name=us-east-1&s3_signature_version=s3v4"}'
+    volumes:
+      - ./airflow_service/dags:/opt/airflow/dags
+      - ./airflow_service/logs:/opt/airflow/logs
+      - ./airflow_service/plugins:/opt/airflow/plugins
+      - ./airflow_service/data:/opt/airflow/data
+      - ./spark_service/scripts:/opt/airflow/scripts
+      - ./spark_service/events:/opt/spark-events
+      - ./spark_service/conf/spark-defaults.conf:/tmp/spark_conf/spark-defaults.conf
+      - ./spark_service/conf/log4j2.properties:/tmp/spark_conf/log4j2.properties
+      # --- VOLUMES PARA O DBT ---
+      - ./dbt_project:/opt/airflow/dbt_project
+      - ./airflow_service/dbt/profiles.yml:/home/airflow/.dbt/profiles.yml
+    depends_on:
+      airflow_init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_started
+    networks:
+      - mds_network
+
+  spark-master:
+    build:
+      context: ./spark_service/conf
+      dockerfile: Dockerfile.spark
+    container_name: spark_master
+    hostname: spark-master
+    ports:
+      - "9090:8080" # UI do Spark Master
+      - "7077:7077" # Porta do Spark Master
+      - "6066:6066" # Porta para Submissão de Jobs
+    volumes:
+      - ./airflow_service/data:/opt/airflow/data
+      - ./spark_service/work/scripts:/opt/spark-scripts
+      - ./spark_service/events:/opt/spark-events
+      - ./spark_service/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
+      - ./spark_service/conf/log4j2.properties:/opt/spark/conf/log4j2.properties
+    environment:
+      SPARK_MODE: master
+      SPARK_RPC_AUTHENTICATION_ENABLED: "no"
+      SPARK_RPC_ENCRYPTION_ENABLED: "no"
+      SPARK_LOCAL_DIRS: /tmp/spark-temp
+      # Adicionando variáveis para conexão com MinIO
+      AWS_ACCESS_KEY_ID: datalake
+      AWS_SECRET_ACCESS_KEY: datalake
+      AWS_ENDPOINT_URL: http://minio:9000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 240s
+    depends_on:
+      minio:
+        condition: service_started
+      kafka-broker:
+        condition: service_started
+    networks:
+      - mds_network
+
+  spark-worker:
+    build:
+      context: ./spark_service/conf
+      dockerfile: Dockerfile.spark
+    #container_name: spark_worker
+    hostname: spark-worker
+    volumes:
+      - ./airflow_service/data:/opt/airflow/data
+      - ./spark_service/work/scripts:/opt/spark-scripts
+      - ./spark_service/events:/opt/spark-events
+      - ./spark_service/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
+      - ./spark_service/conf/log4j2.properties:/opt/spark/conf/log4j2.properties
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_RPC_AUTHENTICATION_ENABLED: "no"
+      SPARK_RPC_ENCRYPTION_ENABLED: "no"
+      SPARK_WORKER_CORE: 2
+      SPARK_WORKER_MEMORY: 2g
+      SPARK_LOCAL_DIRS: /tmp/spark-temp
+      # Adicionando variáveis para conexão com MinIO
+      AWS_ACCESS_KEY_ID: datalake
+      AWS_SECRET_ACCESS_KEY: datalake
+      AWS_ENDPOINT_URL: http://minio:9000
+    depends_on:
+      spark-master:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      kafka-broker:
+        condition: service_started
+    networks:
+      - mds_network
+  
+  # -----------------------------------------------------------------------------------
+  #  CAMADA DE STREAMING (Kafka & Flink)
+  # -----------------------------------------------------------------------------------
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: zookeeper
+    hostname: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD-SHELL", "echo stat | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 240s
+    networks:
+      - mds_network
+
+  kafka-broker:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka_broker
+    hostname: kafka-broker
+    ports:
+      - "9092:9092"
+      - "29092:29092" # Porta para acesso de fora do Docker
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker:9092,PLAINTEXT_HOST://localhost:29092 # Adjust localhost if running on remote machine
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 240s
+    networks:
+      - mds_network
+
+  kafka-schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.0
+    container_name: kafka_schema_registry
+    hostname: kafka-schema-registry
+    ports:
+      - "8081:8081" # Porta padrão do Schema Registry
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: kafka-schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka-broker:9092
+    depends_on:
+      kafka-broker:
+        condition: service_started
+    networks:
+      - mds_network
+
+  kafka-connect:
+    image: confluentinc/cp-kafka-connect:7.6.0
+    container_name: kafka_connect
+    hostname: kafka-connect
+    ports:
+      - "8083:8083" # Porta padrão do Kafka Connect REST API
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: kafka-broker:9092
+      CONNECT_REST_PORT: 8083
+      CONNECT_GROUP_ID: connect-cluster
+      CONNECT_CONFIG_STORAGE_TOPIC: connect-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: connect-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: connect-status
+      CONNECT_KEY_CONVERTER: io.confluent.connect.avro.AvroConverter
+      CONNECT_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
+      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: http://kafka-schema-registry:8081
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://kafka-schema-registry:8081
+      CONNECT_INTERNAL_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_INTERNAL_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_INTERNAL_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_INTERNAL_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_PLUGIN_PATH: /usr/share/java,/usr/bin/confluent/share/java,/usr/local/share/kafka/plugins # Adicionar plugins customizados
+      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
+      CONNECT_REQUEST_TIMEOUT_MS: 120000 # Aumenta o timeout geral para 120 segundos (2 minutos)
+      CONNECT_CONSUMER_REQUEST_TIMEOUT_MS: 120000 # Timeout para o consumidor interno do Connect
+      CONNECT_PRODUCER_REQUEST_TIMEOUT_MS: 120000 # Timeout para o produtor interno do Connect
+      CONNECT_TOPIC_CREATION_ENABLE: "true" # Garante que a criação automática de tópicos está ativada
+      CONNECT_METADATA_MAX_AGE_MS: 30000 # Reduz o cache de metadados para mais refreshes
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+    depends_on:
+      kafka-broker:
+        condition: service_started
+      kafka-schema-registry:
+        condition: service_started
+    networks:
+      - mds_network
+
+  kafka-rest-proxy:
+    image: confluentinc/cp-kafka-rest:7.6.0
+    container_name: kafka_rest_proxy
+    hostname: kafka-rest-proxy
+    ports:
+      - "8082:8082" # Porta padrão do Kafka REST Proxy
+    environment:
+      KAFKA_REST_HOST_NAME: kafka-rest-proxy
+      KAFKA_REST_BOOTSTRAP_SERVERS: kafka-broker:9092
+      KAFKA_REST_SCHEMA_REGISTRY_URL: http://kafka-schema-registry:8081
+    depends_on:
+      kafka-broker:
+        condition: service_started
+      kafka-schema-registry:
+        condition: service_started
+    networks:
+      - mds_network
+
+  kafka-ksqldb-server:
+    image: confluentinc/cp-ksqldb-server:7.6.0
+    container_name: kafka_ksqldb_server
+    hostname: kafka-ksqldb-server
+    ports:
+      - "8088:8088" # Porta padrão do kSQLdb Server
+    environment:
+      KSQL_LISTENERS: http://0.0.0.0:8088
+      KSQL_BOOTSTRAP_SERVERS: kafka-broker:9092
+      KSQL_KSQL_SCHEMA_REGISTRY_URL: http://kafka-schema-registry:8081
+      KSQL_KSQL_LOGGING_PROCESSING_STREAM_AUTO_CREATE: "true"
+      KSQL_KSQL_LOGGING_PROCESSING_ERROR_STREAM_AUTO_CREATE: "true"
+    depends_on:
+      kafka-broker:
+        condition: service_started
+      kafka-schema-registry:
+        condition: service_started
+    networks:
+      - mds_network
+
+  kafka-control-center:
+    image: confluentinc/cp-enterprise-control-center:7.6.0
+    container_name: kafka_control_center
+    hostname: kafka-control-center
+    ports:
+      - "9021:9021" # Porta padrão do Control Center
+    environment:
+      CONTROL_CENTER_BOOTSTRAP_SERVERS: kafka-broker:9092
+      CONTROL_CENTER_ZOOKEEPER_CONNECT: zookeeper:2181
+      CONTROL_CENTER_SCHEMA_REGISTRY_URL: http://kafka-schema-registry:8081
+      CONTROL_CENTER_CONNECT_CLUSTER: http://kafka-connect:8083
+      CONTROL_CENTER_KSQL_URL: http://kafka-ksqldb-server:8088
+      CONTROL_CENTER_REPLICATION_FACTOR: 1
+      CONTROL_CENTER_INTERNAL_TOPICS_PARTITIONS: 1
+      CONTROL_CENTER_STREAMS_NUM_THREADS: 1
+      CONTROL_CENTER_RESERVED_PORTS: "8081,8082,8083,8088,9092,29092"
+      CONTROL_CENTER_UI_AUTO_REFRESH_INTERVAL: 10000
+      CONTROL_CENTER_ID: c1
+    depends_on:
+      kafka-broker:
+        condition: service_started
+      kafka-schema-registry:
+        condition: service_started
+      kafka-connect:
+        condition: service_started
+      kafka-ksqldb-server:
+        condition: service_started
+      kafka-rest-proxy:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9021 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 240s
+    networks:
+      - mds_network
+
+  flink-jobmanager:
+    image: flink:1.19.1
+    container_name: flink_jobmanager
+    hostname: flink-jobmanager
+    ports:
+      - "8087:8081"
+    command: jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+    volumes:
+      - flink_checkpoints:/opt/flink/checkpoints
+      - flink_savepoints:/opt/flink/savepoints
+      - flink_jobs:/opt/flink/usrlib
+    networks:
+      - mds_network
+
+  flink-taskmanager:
+    image: flink:1.19.1
+    #container_name: flink_taskmanager
+    command: taskmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+    volumes:
+      - flink_checkpoints:/opt/flink/checkpoints
+      - flink_savepoints:/opt/flink/savepoints
+      - flink_jobs:/opt/flink/usrlib
+    depends_on:
+      - flink-jobmanager
+    networks:
+      - mds_network
+      
+  # -----------------------------------------------------------------------------------
+  #  CAMADA DE INGESTÃO E GOVERNANÇA (Ingestion & Governance)
+  # -----------------------------------------------------------------------------------
+
+  nifi:
+    image: apache/nifi:1.25.0
+    container_name: nifi
+    ports:
+      - "8181:8080"
+      - "19000:10000"
+    environment:
+      - NIFI_WEB_HTTP_PORT=8080
+      - NIFI_JVM_HEAP_INIT=1g
+      - NIFI_JVM_HEAP_MAX=2g
+    volumes:
+      - nifi_conf:/opt/nifi/nifi-current/conf
+      - nifi_database_repo:/opt/nifi/nifi-current/database_repository
+      - nifi_flowfile_repo:/opt/nifi/nifi-current/flowfile_repository
+      - nifi_content_repo:/opt/nifi/nifi-current/content_repository
+      - nifi_provenance_repo:/opt/nifi/nifi-current/provenance_repository
+      - nifi_state:/opt/nifi/nifi-current/state
+      - nifi_logs:/opt/nifi/nifi-current/logs
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/nifi-api/system-diagnostics"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 240s
+    networks:
+      - mds_network
+
+
+  # --- SERVIÇOS OPENMETADATA ---
+  openmetadata_mysql:
+    container_name: openmetadata_mysql
+    image: docker.getcollate.io/openmetadata/db:1.8.1
+    command: "--sort_buffer_size=10M"
+    hostname: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+    ports:
+      - "3307:3306"
+    volumes:
+      - ./docker-volume/db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "--password=password"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    networks:
+      - mds_network
+
+  openmetadata_elasticsearch:
+    container_name: openmetadata_elasticsearch
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.4
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms2024m -Xmx2024m
+      - xpack.security.enabled=false
+    ports:
+      - "9201:9200"
+      - "9300:9300"
+    healthcheck:
+      # --- CONFIGURAÇÃO AJUSTADA ---
+      test: ["CMD-SHELL", "curl -s -f http://localhost:9200/_cluster/health | grep -q '\"status\":\"yellow\"'"]
+      interval: 30s    # Verifique a cada 30 segundos (em vez de 15s)
+      timeout: 25s     # Aumenta o tempo de espera do comando para 25s
+      retries: 10      # Mantém 10 tentativas (total de 300 segundos ou 5 minutos)
+      start_period: 220s # IMPORTANTE: Dá uma "janela de carência" de 3 minutos para o serviço iniciar antes de começar a contar as falhas nas tentativas.
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    networks:
+      - mds_network
+
+  execute-migrate-all:
+    container_name: execute_migrate_all
+    image: docker.getcollate.io/openmetadata/server:1.8.1
+    command: "./bootstrap/openmetadata-ops.sh migrate"
+    environment:
+      OPENMETADATA_CLUSTER_NAME: "openmetadata"
+      SERVER_PORT: 8585
+      SERVER_ADMIN_PORT: 8586
+      LOG_LEVEL: "INFO"
+      MIGRATION_LIMIT_PARAM: 1200
+      AUTHORIZER_CLASS_NAME: "org.openmetadata.service.security.DefaultAuthorizer"
+      AUTHORIZER_REQUEST_FILTER: "org.openmetadata.service.security.JwtFilter"
+      AUTHORIZER_ADMIN_PRINCIPALS: "[admin]"
+      AUTHORIZER_ALLOWED_REGISTRATION_DOMAIN: "[\"all\"]"
+      AUTHORIZER_INGESTION_PRINCIPALS: "[ingestion-bot]"
+      AUTHORIZER_PRINCIPAL_DOMAIN: "open-metadata.org"
+      AUTHORIZER_ALLOWED_DOMAINS: "[]"
+      AUTHORIZER_ENFORCE_PRINCIPAL_DOMAIN: "false"
+      AUTHORIZER_ENABLE_SECURE_SOCKET: "false"
+      AUTHENTICATION_PROVIDER: "basic"
+      AUTHENTICATION_RESPONSE_TYPE: "id_token"
+      CUSTOM_OIDC_AUTHENTICATION_PROVIDER_NAME: ""
+      AUTHENTICATION_PUBLIC_KEYS: "[http://localhost:8585/api/v1/system/config/jwks]"
+      AUTHENTICATION_AUTHORITY: "https://accounts.google.com"
+      AUTHENTICATION_CLIENT_ID: ""
+      AUTHENTICATION_CALLBACK_URL: ""
+      AUTHENTICATION_JWT_PRINCIPAL_CLAIMS: "[email,preferred_username,sub]"
+      AUTHENTICATION_JWT_PRINCIPAL_CLAIMS_MAPPING: "[]"
+      AUTHENTICATION_ENABLE_SELF_SIGNUP: "true"
+      AUTHENTICATION_CLIENT_TYPE: "public"
+      RSA_PUBLIC_KEY_FILE_PATH: "./conf/public_key.der"
+      RSA_PRIVATE_KEY_FILE_PATH: "./conf/private_key.der"
+      JWT_ISSUER: "open-metadata.org"
+      JWT_KEY_ID: "Gb389a-9f76-gdjs-a92j-0242bk94356"
+      PIPELINE_SERVICE_CLIENT_ENDPOINT: "http://ingestion:8080"
+      SERVER_HOST_API_URL: "http://openmetadata-server:8585/api"
+      PIPELINE_SERVICE_CLIENT_VERIFY_SSL: "no-ssl"
+      DB_DRIVER_CLASS: "com.mysql.cj.jdbc.Driver"
+      DB_SCHEME: "mysql"
+      DB_PARAMS: "allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC"
+      DB_USER: "openmetadata_user"
+      DB_USER_PASSWORD: "openmetadata_password"
+      DB_HOST: "openmetadata_mysql"
+      DB_PORT: "3306"
+      OM_DATABASE: "openmetadata_db"
+      ELASTICSEARCH_HOST: "openmetadata_elasticsearch"
+      ELASTICSEARCH_PORT: 9200
+      ELASTICSEARCH_SCHEME: "http"
+      SEARCH_TYPE: "elasticsearch"
+      PIPELINE_SERVICE_CLIENT_ENABLED: "true"
+      PIPELINE_SERVICE_CLIENT_CLASS_NAME: "org.openmetadata.service.clients.pipeline.airflow.AirflowRESTClient"
+      AIRFLOW_USERNAME: "admin"
+      AIRFLOW_PASSWORD: "admin"
+      AIRFLOW_TIMEOUT: 10
+      FERNET_KEY: "jJ/9sz0g0OHxsfxOoSfdFdmk3ysNmPRnH3TUAbz3IHA="
+      SECRET_MANAGER: "db"
+      OPENMETADATA_HEAP_OPTS: "-Xmx1G -Xms1G"
+    depends_on:
+      openmetadata_elasticsearch:
+        condition: service_started
+      openmetadata_mysql:
+        condition: service_healthy
+    networks:
+      - mds_network
+
+  openmetadata-server:
+    container_name: openmetadata_server
+    image: docker.getcollate.io/openmetadata/server:1.8.1
+    environment:
+      OPENMETADATA_CLUSTER_NAME: "openmetadata"
+      SERVER_PORT: 8585
+      SERVER_ADMIN_PORT: 8586
+      LOG_LEVEL: "INFO"
+      AUTHORIZER_CLASS_NAME: "org.openmetadata.service.security.DefaultAuthorizer"
+      AUTHORIZER_REQUEST_FILTER: "org.openmetadata.service.security.JwtFilter"
+      AUTHORIZER_ADMIN_PRINCIPALS: "[admin]"
+      AUTHORIZER_ALLOWED_REGISTRATION_DOMAIN: "[\"all\"]"
+      AUTHORIZER_INGESTION_PRINCIPALS: "[ingestion-bot]"
+      AUTHORIZER_PRINCIPAL_DOMAIN: "open-metadata.org"
+      AUTHORIZER_ALLOWED_DOMAINS: "[]"
+      AUTHORIZER_ENFORCE_PRINCIPAL_DOMAIN: "false"
+      AUTHORIZER_ENABLE_SECURE_SOCKET: "false"
+      AUTHENTICATION_PROVIDER: "basic"
+      AUTHENTICATION_RESPONSE_TYPE: "id_token"
+      CUSTOM_OIDC_AUTHENTICATION_PROVIDER_NAME: ""
+      AUTHENTICATION_PUBLIC_KEYS: "[http://localhost:8585/api/v1/system/config/jwks]"
+      AUTHENTICATION_AUTHORITY: "https://accounts.google.com"
+      AUTHENTICATION_CLIENT_ID: ""
+      AUTHENTICATION_CALLBACK_URL: ""
+      AUTHENTICATION_JWT_PRINCIPAL_CLAIMS: "[email,preferred_username,sub]"
+      AUTHENTICATION_JWT_PRINCIPAL_CLAIMS_MAPPING: "[]"
+      AUTHENTICATION_ENABLE_SELF_SIGNUP: "true"
+      AUTHENTICATION_CLIENT_TYPE: "public"
+      RSA_PUBLIC_KEY_FILE_PATH: "./conf/public_key.der"
+      RSA_PRIVATE_KEY_FILE_PATH: "./conf/private_key.der"
+      JWT_ISSUER: "open-metadata.org"
+      JWT_KEY_ID: "Gb389a-9f76-gdjs-a92j-0242bk94356"
+      PIPELINE_SERVICE_CLIENT_ENDPOINT: "http://ingestion:8080"
+      SERVER_HOST_API_URL: "http://openmetadata-server:8585/api"
+      PIPELINE_SERVICE_CLIENT_VERIFY_SSL: "no-ssl"
+      DB_DRIVER_CLASS: "com.mysql.cj.jdbc.Driver"
+      DB_SCHEME: "mysql"
+      DB_PARAMS: "allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC"
+      DB_USER: "openmetadata_user"
+      DB_USER_PASSWORD: "openmetadata_password"
+      DB_HOST: "openmetadata_mysql"
+      DB_PORT: "3306"
+      OM_DATABASE: "openmetadata_db"
+      ELASTICSEARCH_HOST: "openmetadata_elasticsearch"
+      ELASTICSEARCH_PORT: 9200
+      ELASTICSEARCH_SCHEME: "http"
+      SEARCH_TYPE: "elasticsearch"
+      PIPELINE_SERVICE_CLIENT_ENABLED: "true"
+      PIPELINE_SERVICE_CLIENT_CLASS_NAME: "org.openmetadata.service.clients.pipeline.airflow.AirflowRESTClient"
+      AIRFLOW_USERNAME: "admin"
+      AIRFLOW_PASSWORD: "admin"
+      AIRFLOW_TIMEOUT: 10
+      FERNET_KEY: "jJ/9sz0g0OHxsfxOoSfdFdmk3ysNmPRnH3TUAbz3IHA="
+      SECRET_MANAGER: "db"
+      OPENMETADATA_HEAP_OPTS: "-Xmx1G -Xms1G"
+    ports:
+      - "8585:8585"
+      - "8586:8586"
+    depends_on:
+      openmetadata_elasticsearch:
+        condition: service_started
+      openmetadata_mysql:
+        condition: service_healthy
+      execute-migrate-all:
+        condition: service_completed_successfully
+    networks:
+      - mds_network
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "--spider", "http://localhost:8586/healthcheck" ]
+
+  ingestion:
+    container_name: openmetadata_ingestion
+    image: docker.getcollate.io/openmetadata/ingestion:1.8.1
+    depends_on:
+      openmetadata_mysql:
+        condition: service_healthy
+      openmetadata-server:
+        condition: service_started
+    environment:
+      AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__OPENMETADATA_AIRFLOW_APIS__DAG_GENERATED_CONFIGS: "/opt/airflow/dag_generated_configs"
+      DB_HOST: "openmetadata_mysql"
+      DB_PORT: "3306"
+      AIRFLOW_DB: "airflow_db"
+      DB_SCHEME: "mysql+mysqldb"
+      DB_USER: "airflow_user"
+      DB_PASSWORD: "airflow_pass"
+    ports:
+      - "8084:8080"
+    networks:
+      - mds_network
+    volumes:
+      - ingestion-volume-dag-airflow:/opt/airflow/dag_generated_configs
+      - ingestion-volume-dags:/opt/airflow/dags
+      - ingestion-volume-tmp:/tmp
+
+  # -----------------------------------------------------------------------------------
+  #  CAMADA DE VISUALIZAÇÃO E FERRAMENTAS (BI, Querying & Tools)
+  # -----------------------------------------------------------------------------------
+
+  kibana:
+    image: kibana:8.11.4
+    container_name: kibana
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: '["http://openmetadata_elasticsearch:9200"]'
+    depends_on:
+      openmetadata_elasticsearch:
+        condition: service_started
+    networks:
+      - mds_network
+
+  trino:
+    image: fjardim/mds-trino 
+    platform: linux/amd64
+    container_name: trino
+    hostname: trino
+    ports: 
+      - "8086:8080" 
+    depends_on:
+      - postgres
+      #- metastore
+    volumes: 
+      - ./trino/catalog:/etc/trino/catalog  
+      - ./trino/conf:/conf
+      - ./scripts:/scripts
+
+  superset-init:
+    image: apache/superset:4.0.0
+    container_name: superset_init
+    command: ["/app/superset/init-superset.sh"]
+    environment:
+      SUPERSET_SECRET_KEY: "v2qGZ1P+pSi+y5g8gT6bV7A8d1cVzRwzJ/uBw3ySgGgCq/8eK/1t"
+      SUPERSET_DATABASE_URI: "postgresql+psycopg2://airflow:airflow@postgres_db:5432/superset_pg_db"
+      PYTHONPATH: "/app/pythonpath"
+    volumes:
+      - ./superset/superset_config.py:/app/pythonpath/superset_config.py
+      - ./superset/init-superset.sh:/app/superset/init-superset.sh
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - mds_network
+
+  superset:
+    image: apache/superset:4.0.0
+    container_name: superset_app
+    command: ["/usr/bin/run-server.sh"]
+    ports:
+      - "8089:8088"
+    environment:
+      SUPERSET_SECRET_KEY: "v2qGZ1P+pSi+y5g8gT6bV7A8d1cVzRwzJ/uBw3ySgGgCq/8eK/1t"
+      SUPERSET_DATABASE_URI: "postgresql+psycopg2://airflow:airflow@postgres_db:5432/superset_pg_db"
+    volumes:
+      - ./superset/superset_config.py:/app/pythonpath/superset_config.py
+      - superset_data:/app/superset_home
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8088/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 240s
+    networks:
+      - mds_network
+
+  dbeaver:
+    image: dbeaver/cloudbeaver:24.1.0
+    container_name: dbeaver_ui
+    ports:
+      - "8989:8978"
+    environment:
+      # Define o nome do usuário administrador inicial.
+      # Mude 'admin' para o que preferir.
+      - CB_ADMIN_NAME=admin
+      # Define a senha para o administrador inicial.
+      # IMPORTANTE: Troque 'suaSenhaSuperSegura' por uma senha forte.
+      - CB_ADMIN_PASSWORD=Admin123
+    volumes:
+      - dbeaver_data:/opt/cloudbeaver/workspace
+      - ./cloudbeaver-conf/data-sources.json:/opt/cloudbeaver/workspace/GlobalConfiguration/.dbeaver/data-sources.json
+    depends_on:
+      - trino
+    networks:
+      - mds_network
+
+  notebook-spark:
+    build:
+      context: ./spark_service/conf
+      dockerfile: Dockerfile.spark
+    container_name: notebook_spark
+    hostname: notebook-spark
+    ports:
+      - "9888:8888"
+    volumes:
+      - ./airflow_service/data:/opt/airflow/data
+      - ./spark_service/notebooks:/opt/spark-notebooks
+      - ./spark_service/work/scripts:/opt/spark-scripts
+      - ./spark_service/events:/opt/spark-events
+      - ./spark_service/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
+      - ./spark_service/conf/log4j2.properties:/opt/spark/conf/log4j2.properties
+    environment:
+      SPARK_MASTER_URL: spark://spark-master:7077
+      JUPYTER_ENABLE_LAB: "yes"
+      PYSPARK_SUBMIT_ARGS: "--master spark://spark-master:7077 --executor-memory 4g --driver-memory 2g pyspark-shell"
+      SPARK_RPC_AUTHENTICATION_ENABLED: "no"
+      SPARK_RPC_ENCRYPTION_ENABLED: "no"
+      JAVA_HOME: /opt/bitnami/java
+      AWS_ACCESS_KEY_ID: datalake
+      AWS_SECRET_ACCESS_KEY: datalake
+      AWS_ENDPOINT_URL: http://minio:9000
+    entrypoint: ["python", "-m", "jupyterlab", "--ip=0.0.0.0", "--port=8888", "--allow-root"]
+    depends_on:
+      spark-master:
+        condition: service_healthy
+      spark-worker:
+        condition: service_started
+      minio:
+        condition: service_started
+      kafka-broker:
+        condition: service_started
+    networks:
+      - mds_network
+
+  # -----------------------------------------------------------------------------------
+  #  CAMADA DE CI/CD E MONITORAMENTO
+  # -----------------------------------------------------------------------------------
+
+  jenkins:
+    image: jenkins/jenkins:lts-jdk17
+    container_name: jenkins_ci_cd
+    user: root
+    ports:
+      - "8085:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_data:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./:/home/jenkins/workspace/project:ro
+      - ./airflow_service/dags:/home/jenkins/workspace/project/airflow_service/dags
+      - ./airflow_service/scripts:/home/jenkins/workspace/project/airflow_service/scripts
+      - ./spark_service/work/scripts:/home/jenkins/workspace/project/spark_service/work/scripts
+      - ./spark_service/notebooks:/home/jenkins/workspace/project/spark_service/notebooks
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/login"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 240s
+    networks:
+      - mds_network
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: prometheus
+    ports:
+      - "19090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - mds_network
+
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - mds_network
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.1
+    container_name: node_exporter
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    restart: unless-stopped
+    networks:
+      - mds_network
+
+  postgres-exporter:
+    image: bitnami/postgres-exporter:0.15.0
+    container_name: postgres_exporter
+    environment:
+      - DATA_SOURCE_NAME=postgresql://airflow:airflow@postgres_db:5432/airflow?sslmode=disable
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    networks:
+      - mds_network
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.59.0
+    container_name: redis_exporter
+    environment:
+      - REDIS_ADDR=redis://redis_cache:6379
+    restart: unless-stopped
+    depends_on:
+      - redis
+    networks:
+      - mds_network
+
+# -----------------------------------------------------------------------------------
+#  CAMADA HIVE
+# -----------------------------------------------------------------------------------
+
+  hive-metastore:
+    build:
+      context: ./hive
+    container_name: hive_metastore
+    hostname: hive-metastore
+    ports:
+      - "9083:9083" # Porta do Metastore Thrift
+    volumes:
+      - ./hive/hive-site.xml:/opt/hive/conf/hive-site.xml
+    environment:
+      SERVICE_NAME: metastore
+      DB_DRIVER: postgres
+      METASTORE_DB_HOSTNAME: postgres_db
+      METASTORE_DATABASE_NAME: metastore_db
+      METASTORE_DB_USER: airflow
+      METASTORE_DB_PASSWORD: airflow
+      HADOOP_CONF_DIR: /opt/hive/conf
+      AWS_ACCESS_KEY_ID: datalake
+      AWS_SECRET_ACCESS_KEY: datalake
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - mds_network
+
+  hive-server:
+    build:
+      context: ./hive
+    container_name: hive_server
+    hostname: hive-server
+    ports:
+      - "10000:10000" # Porta do HiveServer2 JDBC/ODBC
+      - "10002:10002" # Porta da UI Web do HiveServer2
+    environment:
+      SERVICE_NAME: hiveserver2
+      HIVE_METASTORE_URI: thrift://hive-metastore:9083
+      # Configurações do Hadoop para acessar o Minio como se fosse S3
+      HADOOP_CONF_fs_s3a_endpoint: "http://minio:9000"
+      HADOOP_CONF_fs_s3a_access_key: "datalake"
+      HADOOP_CONF_fs_s3a_secret_key: "datalake"
+      HADOOP_CONF_fs_s3a_path_style_access: "true"
+      HADOOP_CONF_fs_s3a_impl: "org.apache.hadoop.fs.s3a.S3AFileSystem"
+      HADOOP_CONF_fs_s3a_connection_ssl_enabled: "false"
+    depends_on:
+      hive-metastore:
+        condition: service_started
+    networks:
+      - mds_network
+
+# -----------------------------------------------------------------------------------
+#  CAMADA DE AUTOMAÇÃO E INTEGRAÇÃO (Automation & Integration)
+# -----------------------------------------------------------------------------------
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:1.46.0 # Usar uma versão específica é uma boa prática
+    container_name: n8n_automation
+    hostname: n8n
+    ports:
+      - "5678:5678"
+    environment:
+      # --- Configuração do Banco de Dados (PostgreSQL) ---
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres_db
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n_db
+      - DB_POSTGRESDB_USER=airflow
+      - DB_POSTGRESDB_PASSWORD=airflow
+
+      # --- Configuração Geral e de Segurança (MUITO IMPORTANTE) ---
+      # ATENÇÃO: Gere uma chave aleatória longa e segura para esta variável!
+      # Não use a chave de exemplo em produção.
+      - N8N_ENCRYPTION_KEY=SUA_CHAVE_DE_CRIPTOGRAFIA_SECRETA_E_LONGA
+      
+      # Define o fuso horário para os agendamentos (CRON)
+      - GENERIC_TIMEZONE=America/Sao_Paulo
+
+      # Define a URL pública do N8N para que os webhooks sejam gerados corretamente
+      - WEBHOOK_URL=http://localhost:5678/
+
+      # --- Otimização de Execuções ---
+      # Habilita a remoção automática de logs de execuções antigas
+      - EXECUTIONS_DATA_PRUNE=true
+      # Mantém os dados de execuções por 30 dias
+      - EXECUTIONS_DATA_MAX_AGE=30
+
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - mds_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+# =========================================================================================
+#  DEFINIÇÃO DOS VOLUMES
+# =========================================================================================
+volumes:
+  postgres_data_v2:
+  redis_data:
+  spark_events:
+  zookeeper_data:
+  zookeeper_log:
+  kafka_data:
+  minio_data:
+  jenkins_data:
+  neo4j_data:
+  neo4j_logs:
+  superset_data:
+  nifi_conf:
+  nifi_database_repo:
+  nifi_flowfile_repo:
+  nifi_content_repo:
+  nifi_provenance_repo:
+  nifi_state:
+  nifi_logs:
+  flink_checkpoints:
+  flink_savepoints:
+  flink_jobs:
+  prometheus_data:
+  grafana_data:
+  mongodb_data:
+  dbeaver_data:
+  es-data:
+  ingestion-volume-dag-airflow:
+  ingestion-volume-dags:
+  ingestion-volume-tmp:
+  trino_data_coordinator:
+  trino_data_worker:
+  n8n_data:
+# =========================================================================================
+#  DEFINIÇÃO DAS REDES
+# =========================================================================================
+networks:
+  mds_network:
+    external: true

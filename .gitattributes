@@ -1,0 +1,2 @@
+airflow_service/conf/hadoop_jars/aws-java-sdk-bundle-1.12.316.jar filter=lfs diff=lfs merge=lfs -text
+airflow_service/conf/spark-3.5.6-bin-hadoop3.tgz filter=lfs diff=lfs merge=lfs -text

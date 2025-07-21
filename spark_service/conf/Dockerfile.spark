@@ -1,0 +1,59 @@
+# new_mds/spark_service/conf/Dockerfile.spark
+
+# Usar uma imagem Bitnami Spark como base
+# Usando a tag específica para Spark 3.5.6 com Debian 12
+FROM bitnami/spark:3.5.6-debian-12-r1
+
+# ADICIONADO: Garante que /usr/local/bin esteja no PATH para executáveis Python
+ENV PATH="/usr/local/bin:$PATH"
+
+# A imagem Bitnami já define o SPARK_HOME internamente, mas vamos definir explicitamente
+# para garantir que nossos comandos COPY e o PATH o utilizem corretamente.
+ENV SPARK_HOME=/opt/bitnami/spark
+ENV PATH=$PATH:${SPARK_HOME}/bin:${SPARK_HOME}/sbin
+
+# A imagem Bitnami normalmente é executada como usuário 'root' para setup e depois
+# troca para um usuário não-root (como 'daemon' ou '1001').
+# Para garantir que a cópia dos arquivos de configuração funcione, fazemos isso como root.
+USER root
+
+# Copia os arquivos de configuração do Spark para dentro do container do Spark
+# Certifique-se de que os paths estão corretos para o SPARK_HOME da Bitnami
+COPY log4j2.properties ${SPARK_HOME}/conf/log4j2.properties
+COPY spark-defaults.conf ${SPARK_HOME}/conf/spark-defaults.conf
+
+# Instala as bibliotecas Python adicionais.
+# pyspark já vem com a imagem base, mas se precisarmos de uma versão MUITO específica
+# ou se a que vem for incompatível, podemos reinstalá-la aqui.
+# Mantendo pyspark==3.5.6 para garantir a versão específica desejada pelo usuário.
+RUN pip install --no-cache-dir \
+    pyspark==3.5.6 \
+    delta-spark==3.1.0 \
+    pandas==2.1.4 \
+    numpy==1.26.4 \
+    scikit-learn==1.5.0 \
+    seaborn==0.13.2 \
+    matplotlib==3.9.0 \
+    google-cloud-storage==2.18.2 \
+    azure-storage-blob==12.23.1 \
+    boto3==1.34.120 \
+    great-expectations==0.18.9 \
+    fastparquet \
+    openpyxl \
+    pyarrow \
+    jupyterlab==4.2.0 \
+    notebook==7.2.1 \
+    ipykernel==6.29.5 \
+    kafka-python==2.0.2 \
+    ipywidgets && \
+    jupyter labextension enable @jupyter-widgets/jupyterlab-manager
+
+
+# Expõe portas para o driver do Spark se o driver for executado no worker do Airflow
+EXPOSE 7007
+EXPOSE 7008
+
+# A imagem Bitnami já define o usuário padrão para execução (geralmente 'daemon').
+# Se precisar de um usuário específico para o Spark ou Jupyter, podemos definir aqui.
+# USER ${SPARK_USER} (se SPARK_USER fosse definido e adicionado)
+# Por enquanto, confiamos no usuário padrão da Bitnami para a execução.
