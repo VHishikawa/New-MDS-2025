@@ -100,8 +100,8 @@ RUN pip install --no-cache-dir \
     psycopg2-binary==2.9.9 \
     redis==5.0.0 \
     dbt-core==1.8.2 \
-    dbt-trino==1.8.1
-
+    dbt-trino==1.8.1 \
+    discord-webhook
 # Expõe portas para o driver do Spark se o driver for executado no worker do Airflow
 EXPOSE 7007
 EXPOSE 7008
