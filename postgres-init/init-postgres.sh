@@ -42,14 +42,12 @@ EOSQL
 echo "Iniciando script de inicialização customizado do PostgreSQL..."
 
 # --- 1. CRIAR BANCOS DE DADOS ADICIONAIS ---
-# O banco 'airflow' principal é criado automaticamente pela imagem do postgres.
 create_database "superset_pg_db"
 create_database "metastore_db"
-create_database "n8n_db"  # <-- ADICIONADO PARA O N8N
+create_database "n8n_db"
+create_database "openmetadata_ingestion_db" # <-- INTEGRADO AQUI
 
 # --- 2. CRIAR ROLES (GRUPOS) ---
-# Dica de melhoria: o comando 'CREATE ROLE' falhará se o role já existir.
-# Para torná-lo verdadeiramente idempotente, podemos envolvê-lo em um bloco DO.
 echo "Criando roles 'developer_role' e 'readonly_role' (se não existirem)..."
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
     DO \$\$
@@ -64,13 +62,20 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     \$\$;
 EOSQL
 
-# --- 3. APLICAR PERMISSÕES NOS BANCOS DE DADOS ---
+# --- 3. ATRIBUIR ROLES AO USUÁRIO PRINCIPAL ---
+# Garante que o usuário 'airflow' tenha as permissões de desenvolvedor.
+# Isso é crucial para que o serviço de ingestão consiga escrever no seu banco de dados.
+echo "Atribuindo 'developer_role' ao usuário '$POSTGRES_USER'..."
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+    GRANT developer_role TO "$POSTGRES_USER";
+EOSQL
+
+# --- 4. APLICAR PERMISSÕES NOS BANCOS DE DADOS ---
 # Conectamos em cada banco de dados para aplicar as permissões.
-# O PostgreSQL exige que você esteja conectado ao banco para alterar permissões default.
 grant_permissions "airflow"
 grant_permissions "superset_pg_db"
 grant_permissions "metastore_db"
-grant_permissions "n8n_db" # <-- ADICIONADO PARA O N8N
-
+grant_permissions "n8n_db"
+grant_permissions "openmetadata_ingestion_db" # <-- INTEGRADO AQUI
 
 echo "Script de inicialização do PostgreSQL foi concluído com sucesso."

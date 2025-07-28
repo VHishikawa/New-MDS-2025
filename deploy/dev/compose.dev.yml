@@ -1,104 +1,140 @@
 # compose.dev.yml
-# Override para a VM de Desenvolvimento (16GB RAM, 4 vCPUs)
+# Override para VM de Desenvolvimento (32GB RAM, 8 vCPUs) com TODOS os serviços
+# Alocação Total: ~28 GB RAM, ~7.9 vCPUs
 version: "3.8"
 
 services:
 
-  # --- Camada de Armazenamento e Cache ---
+  # --- Camada de Armazenamento e Cache (Base Sólida) ---
   postgres:
-    deploy: { resources: { limits: { cpus: '0.75', memory: '2G' } } }
+    deploy: { resources: { limits: { cpus: '1.0', memory: '3G' } } }
     restart: unless-stopped
   redis:
-    deploy: { resources: { limits: { cpus: '0.25', memory: '512M' } } }
+    deploy: { resources: { limits: { cpus: '0.10', memory: '256M' } } }
     restart: unless-stopped
   minio:
-    deploy: { resources: { limits: { cpus: '0.50', memory: '1G' } } }
+    deploy: { resources: { limits: { cpus: '0.25', memory: '512M' } } }
     restart: unless-stopped
   neo4j_db:
-    deploy: { resources: { limits: { cpus: '0.75', memory: '1.5G' } } }
+    deploy: { resources: { limits: { cpus: '0.50', memory: '1.5G' } } }
     restart: unless-stopped
   mongodb:
     deploy: { resources: { limits: { cpus: '0.50', memory: '1.5G' } } }
     restart: unless-stopped
 
-  # --- Camada de Orquestração e Processamento ---
+  # --- Camada de Orquestração e Processamento (Núcleo do DEV) ---
   airflow_webserver:
-    deploy: { resources: { limits: { cpus: '0.50', memory: '1.5G' } } }
+    deploy: { resources: { limits: { cpus: '0.25', memory: '1.5G' } } }
     restart: unless-stopped
   airflow_scheduler:
-    deploy: { resources: { limits: { cpus: '0.75', memory: '1.5G' } } }
+    deploy: { resources: { limits: { cpus: '0.50', memory: '1.5G' } } }
     restart: unless-stopped
   airflow_worker:
     deploy:
-      replicas: 2
-      resources: { limits: { cpus: '0.50', memory: '1.5G' } }
-    restart: unless-stopped
-  airflow_triggerer:
-    deploy: { resources: { limits: { cpus: '0.25', memory: '512M' } } }
-    restart: unless-stopped
-  spark-master:
-    deploy: { resources: { limits: { cpus: '0.50', memory: '1G' } } }
-    restart: unless-stopped
-  spark-worker:
-    environment: { SPARK_WORKER_CORES: '1', SPARK_WORKER_MEMORY: '2G' }
-    deploy:
-      replicas: 1
+      replicas: 1 # Apenas 1 réplica para DEV
       resources: { limits: { cpus: '1.0', memory: '2.5G' } }
     restart: unless-stopped
-  
-  # --- Camada de Streaming ---
-  zookeeper:
+  airflow_triggerer:
+    deploy: { resources: { limits: { cpus: '0.10', memory: '256M' } } }
+    restart: unless-stopped
+  spark-master:
     deploy: { resources: { limits: { cpus: '0.25', memory: '512M' } } }
+    restart: unless-stopped
+  spark-worker:
+    environment: { SPARK_WORKER_CORES: '2', SPARK_WORKER_MEMORY: '3G' } # Heap de 3G
+    deploy:
+      replicas: 1
+      resources: { limits: { cpus: '1.0', memory: '4G' } } # Limite Docker de 4G
+    restart: unless-stopped
+  
+  # --- Camada de Streaming (Recursos Mínimos para Estar Online) ---
+  zookeeper:
+    deploy: { resources: { limits: { cpus: '0.10', memory: '256M' } } }
     restart: unless-stopped
   kafka-broker:
     environment: { KAFKA_HEAP_OPTS: "-Xms512m -Xmx512m" }
-    deploy: { resources: { limits: { cpus: '0.75', memory: '1G' } } }
+    deploy: { resources: { limits: { cpus: '0.50', memory: '1G' } } }
+    restart: unless-stopped
+  kafka-schema-registry:
+    deploy: { resources: { limits: { cpus: '0.10', memory: '512M' } } }
+    restart: unless-stopped
+  kafka-connect:
+    deploy: { resources: { limits: { cpus: '0.25', memory: '512M' } } }
+    restart: unless-stopped
+  kafka-control-center: # É pesado, mas pode ser acessado com menos recursos
+    deploy: { resources: { limits: { cpus: '0.25', memory: '512M' } } }
     restart: unless-stopped
   flink-jobmanager:
-    deploy: { resources: { limits: { cpus: '0.50', memory: '1G' } } }
+    deploy: { resources: { limits: { cpus: '0.25', memory: '512M' } } }
     restart: unless-stopped
   flink-taskmanager:
     deploy:
       replicas: 1
-      resources: { limits: { cpus: '1.0', memory: '2G' } }
+      resources: { limits: { cpus: '0.50', memory: '1G' } }
     restart: unless-stopped
 
-  # --- Camada de Ingestão e Governança ---
+  # --- Camada de Ingestão e Governança (Serviços Pesados) ---
   nifi:
-    environment: { NIFI_JVM_HEAP_INIT: '1g', NIFI_JVM_HEAP_MAX: '1g' }
-    deploy: { resources: { limits: { cpus: '1.0', memory: '2G' } } }
+    environment: { NIFI_JVM_HEAP_INIT: '1g', NIFI_JVM_HEAP_MAX: '1.5g' } # Heap de 1.5G
+    deploy: { resources: { limits: { cpus: '1.0', memory: '2G' } } } # Limite Docker de 2G
     restart: unless-stopped
   openmetadata_mysql:
-    deploy: { resources: { limits: { cpus: '0.50', memory: '1G' } } }
+    deploy: { resources: { limits: { cpus: '0.25', memory: '1G' } } }
     restart: unless-stopped
   openmetadata_elasticsearch:
-    environment: { ES_JAVA_OPTS: "-Xms1g -Xmx1g" }
-    deploy: { resources: { limits: { cpus: '1.0', memory: '2G' } } }
+    environment: { ES_JAVA_OPTS: "-Xms1g -Xmx1g" } # Heap de 1G
+    deploy: { resources: { limits: { cpus: '1.0', memory: '2G' } } } # Limite Docker de 2G
     restart: unless-stopped
   openmetadata-server:
-    environment: { OPENMETADATA_HEAP_OPTS: "-Xmx1G -Xms1G" }
-    deploy: { resources: { limits: { cpus: '0.75', memory: '1.5G' } } }
+    environment: { OPENMETADATA_HEAP_OPTS: "-Xmx1G -Xms1G" } # Heap de 1G
+    deploy: { resources: { limits: { cpus: '0.50', memory: '1.5G' } } } # Limite Docker de 1.5G
     restart: unless-stopped
-  
+  ingestion:
+    deploy: { resources: { limits: { cpus: '0.25', memory: '512M' } } }
+    restart: unless-stopped
+
   # --- Camada Hive ---
   hive-metastore:
-    deploy: { resources: { limits: { cpus: '0.50', memory: '1G' } } }
+    deploy: { resources: { limits: { cpus: '0.25', memory: '1G' } } }
     restart: unless-stopped
   hive-server:
-    deploy: { resources: { limits: { cpus: '0.75', memory: '1.5G' } } }
+    deploy: { resources: { limits: { cpus: '0.50', memory: '1.5G' } } }
     restart: unless-stopped
 
-  # --- Outros Serviços ---
-  trino:
-    deploy: { resources: { limits: { cpus: '0.50', memory: '2G' } } }
+  # --- Camada de Visualização e Ferramentas ---
+  superset:
+    deploy: { resources: { limits: { cpus: '0.50', memory: '1.5G' } } }
+    restart: unless-stopped
+  kibana: # Leve, pois só visualiza dados do Elasticsearch
+    deploy: { resources: { limits: { cpus: '0.10', memory: '256M' } } }
+    restart: unless-stopped
+  dbeaver:
+    deploy: { resources: { limits: { cpus: '0.10', memory: '512M' } } }
+    restart: unless-stopped
+  notebook-spark:
+    deploy: { resources: { limits: { cpus: '0.25', memory: '256M' } } } # O container é leve, a carga vai pro Spark
+    restart: unless-stopped
+  
+  # --- Camada de CI/CD e Monitoramento ---
+  jenkins:
+    deploy: { resources: { limits: { cpus: '0.50', memory: '1G' } } }
+    restart: unless-stopped
+  prometheus:
+    deploy: { resources: { limits: { cpus: '0.25', memory: '512M' } } }
+    restart: unless-stopped
+  grafana:
+    deploy: { resources: { limits: { cpus: '0.10', memory: '256M' } } }
     restart: unless-stopped
     
-  superset:
-    deploy: { resources: { limits: { cpus: '0.50', memory: '2G' } } }
-    restart: unless-stopped
-  jenkins:
-    deploy: { resources: { limits: { cpus: '1.0', memory: '2G' } } }
+  # --- Camada de Automação ---
+  n8n:
+    deploy: { resources: { limits: { cpus: '0.25', memory: '512M' } } }
     restart: unless-stopped
 
-  # NOTA: Serviços de inicialização (init) e exporters não precisam de grandes recursos.
-  # A política 'unless-stopped' reinicia os serviços se a VM for reiniciada.
+  # --- Camada Query Engine (Nova Estrutura Trino) ---
+  trino-coordinator:
+    deploy: { resources: { limits: { cpus: '0.50', memory: '1G' } } }
+    restart: unless-stopped
+  trino-worker:
+    deploy: { resources: { limits: { cpus: '0.50', memory: '1G' } } }
+    restart: unless-stopped

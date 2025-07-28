@@ -50,7 +50,7 @@ services:
     container_name: minio_init
     depends_on:
       minio:
-        condition: service_healthy
+        condition: service_started
     entrypoint: >
       /bin/sh -c "
       chmod +x /scripts/init-minio.sh &&
@@ -72,9 +72,6 @@ services:
     environment:
       MINIO_ROOT_USER: admin
       MINIO_ROOT_PASSWORD: minioadmin
-      # Para compatibilidade com as chaves que você pediu
-      MINIO_ACCESS_KEY: datalake
-      MINIO_SECRET_KEY: datalake
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data # Volume para persistir os dados do MinIO
@@ -688,7 +685,7 @@ services:
       - mds_network
 
 
-  # --- SERVIÇOS OPENMETADATA ---
+   # --- SERVIÇOS OPENMETADATA ---
   openmetadata_mysql:
     container_name: openmetadata_mysql
     image: docker.getcollate.io/openmetadata/db:1.8.1
@@ -699,7 +696,7 @@ services:
     ports:
       - "3307:3306"
     volumes:
-      - ./docker-volume/db-data:/var/lib/mysql
+      - openmetadata_mysql_data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "--password=password"]
       interval: 15s
@@ -719,12 +716,11 @@ services:
       - "9201:9200"
       - "9300:9300"
     healthcheck:
-      # --- CONFIGURAÇÃO AJUSTADA ---
       test: ["CMD-SHELL", "curl -s -f http://localhost:9200/_cluster/health | grep -q '\"status\":\"yellow\"'"]
-      interval: 30s    # Verifique a cada 30 segundos (em vez de 15s)
-      timeout: 25s     # Aumenta o tempo de espera do comando para 25s
-      retries: 10      # Mantém 10 tentativas (total de 300 segundos ou 5 minutos)
-      start_period: 220s # IMPORTANTE: Dá uma "janela de carência" de 3 minutos para o serviço iniciar antes de começar a contar as falhas nas tentativas.
+      interval: 30s
+      timeout: 25s
+      retries: 10
+      start_period: 220s
     volumes:
       - es-data:/usr/share/elasticsearch/data
     networks:
@@ -868,21 +864,18 @@ services:
   ingestion:
     container_name: openmetadata_ingestion
     image: docker.getcollate.io/openmetadata/ingestion:1.8.1
+    command: ["airflow", "webserver", "--port", "8080"]
     depends_on:
-      openmetadata_mysql:
+      postgres:
         condition: service_healthy
       openmetadata-server:
         condition: service_started
     environment:
-      AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://airflow:airflow@postgres_db:5432/openmetadata_ingestion_db"
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth"
       AIRFLOW__OPENMETADATA_AIRFLOW_APIS__DAG_GENERATED_CONFIGS: "/opt/airflow/dag_generated_configs"
-      DB_HOST: "openmetadata_mysql"
-      DB_PORT: "3306"
-      AIRFLOW_DB: "airflow_db"
-      DB_SCHEME: "mysql+mysqldb"
-      DB_USER: "airflow_user"
-      DB_PASSWORD: "airflow_pass"
     ports:
       - "8084:8080"
     networks:
@@ -891,7 +884,6 @@ services:
       - ingestion-volume-dag-airflow:/opt/airflow/dag_generated_configs
       - ingestion-volume-dags:/opt/airflow/dags
       - ingestion-volume-tmp:/tmp
-
   # -----------------------------------------------------------------------------------
   #  CAMADA DE VISUALIZAÇÃO E FERRAMENTAS (BI, Querying & Tools)
   # -----------------------------------------------------------------------------------
@@ -909,20 +901,44 @@ services:
     networks:
       - mds_network
 
-  trino:
-    image: fjardim/mds-trino 
-    platform: linux/amd64
-    container_name: trino
-    hostname: trino
-    ports: 
-      - "8086:8080" 
+  # -----------------------------------------------------------------------------------
+  #  CAMADA DE VISUALIZAÇÃO E FERRAMENTAS (Query Engine)
+  # -----------------------------------------------------------------------------------
+
+  trino-coordinator:
+    image: trinodb/trino:451 # Usando a imagem oficial e uma tag específica
+    container_name: trino_coordinator
+    hostname: trino-coordinator
+    ports:
+      - "8086:8080" # Porta da UI do Trino
+    volumes:
+      # Monta o diretório de configuração inteiro do coordenador
+      - ./trino/coordinator_config:/etc/trino
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/v1/info || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
     depends_on:
-      - postgres
-      #- metastore
-    volumes: 
-      - ./trino/catalog:/etc/trino/catalog  
-      - ./trino/conf:/conf
-      - ./scripts:/scripts
+      hive-metastore:
+        condition: service_started # Trino precisa do Hive Metastore para o catálogo Hive/Iceberg
+    networks:
+      - mds_network
+
+  trino-worker:
+    image: trinodb/trino:451
+    container_name: trino_worker
+    hostname: trino-worker
+    volumes:
+      # Monta o diretório de configuração inteiro do worker
+      - ./trino/worker_config:/etc/trino
+    depends_on:
+      trino-coordinator:
+        condition: service_healthy # O worker só inicia se o coordenador estiver saudável
+    networks:
+      - mds_network
+
+# ... outros serviços ...
 
   superset-init:
     image: apache/superset:4.0.0
@@ -983,7 +999,7 @@ services:
       - dbeaver_data:/opt/cloudbeaver/workspace
       - ./cloudbeaver-conf/data-sources.json:/opt/cloudbeaver/workspace/GlobalConfiguration/.dbeaver/data-sources.json
     depends_on:
-      - trino
+      - trino-coordinator
     networks:
       - mds_network
 
@@ -1253,6 +1269,7 @@ volumes:
   trino_data_coordinator:
   trino_data_worker:
   n8n_data:
+  openmetadata_mysql_data:
 # =========================================================================================
 #  DEFINIÇÃO DAS REDES
 # =========================================================================================

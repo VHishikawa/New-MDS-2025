@@ -1,40 +1,41 @@
 # compose.hmg.yml
-# Override para a VM de Homologação (32GB RAM, 6 vCPUs)
+# Override para a VM de Homologação (62GB RAM, 16 vCPUs)
+# Alocação Total: ~57 GB RAM, ~15.5 vCPUs
 version: "3.8"
 
 services:
-  
+
   # --- Camada de Armazenamento e Cache ---
   postgres:
-    deploy: { resources: { limits: { cpus: '1.0', memory: '4G' } } }
+    deploy: { resources: { limits: { cpus: '1.5', memory: '6G' } } }
     restart: always
   redis:
-    deploy: { resources: { limits: { cpus: '0.25', memory: '1G' } } }
+    deploy: { resources: { limits: { cpus: '0.50', memory: '1G' } } }
     restart: always
   minio:
     deploy: { resources: { limits: { cpus: '1.0', memory: '2G' } } }
     restart: always
   neo4j_db:
-    deploy: { resources: { limits: { cpus: '1.0', memory: '3G' } } }
+    deploy: { resources: { limits: { cpus: '1.0', memory: '2.5G' } } }
     restart: always
   mongodb:
-    deploy: { resources: { limits: { cpus: '1.0', memory: '3G' } } }
+    deploy: { resources: { limits: { cpus: '1.0', memory: '2.5G' } } }
     restart: always
 
   # --- Camada de Orquestração e Processamento ---
   airflow_webserver:
-    deploy: { resources: { limits: { cpus: '0.75', memory: '2G' } } }
+    deploy: { resources: { limits: { cpus: '0.50', memory: '2G' } } }
     restart: always
   airflow_scheduler:
-    deploy: { resources: { limits: { cpus: '1.0', memory: '2G' } } }
+    deploy: { resources: { limits: { cpus: '1.0', memory: '2.5G' } } }
     restart: always
   airflow_worker:
     deploy:
       replicas: 2
-      resources: { limits: { cpus: '1.0', memory: '3G' } }
+      resources: { limits: { cpus: '1.0', memory: '3G' } } # 6G total
     restart: always
   airflow_triggerer:
-    deploy: { resources: { limits: { cpus: '0.50', memory: '1G' } } }
+    deploy: { resources: { limits: { cpus: '0.25', memory: '512M' } } }
     restart: always
   spark-master:
     deploy: { resources: { limits: { cpus: '0.50', memory: '1G' } } }
@@ -43,61 +44,63 @@ services:
     environment: { SPARK_WORKER_CORES: '2', SPARK_WORKER_MEMORY: '4G' }
     deploy:
       replicas: 2
-      resources: { limits: { cpus: '1.5', memory: '5G' } }
+      resources: { limits: { cpus: '1.5', memory: '5G' } } # 10G total
     restart: always
   
   # --- Camada de Streaming ---
   zookeeper:
-    deploy: { resources: { limits: { cpus: '0.50', memory: '1G' } } }
+    deploy: { resources: { limits: { cpus: '0.25', memory: '1G' } } }
     restart: always
   kafka-broker:
     environment: { KAFKA_HEAP_OPTS: "-Xms1g -Xmx1g" }
     deploy: { resources: { limits: { cpus: '1.0', memory: '2G' } } }
     restart: always
   flink-jobmanager:
-    deploy: { resources: { limits: { cpus: '0.75', memory: '1.5G' } } }
+    deploy: { resources: { limits: { cpus: '0.50', memory: '1G' } } }
     restart: always
   flink-taskmanager:
     deploy:
-      replicas: 2
-      resources: { limits: { cpus: '1.5', memory: '4G' } }
+      replicas: 1 # Apenas 1 para HMG para economizar recursos
+      resources: { limits: { cpus: '1.0', memory: '2G' } }
     restart: always
 
   # --- Camada de Ingestão e Governança ---
   nifi:
-    environment: { NIFI_JVM_HEAP_INIT: '4g', NIFI_JVM_HEAP_MAX: '4g' }
-    deploy: { resources: { limits: { cpus: '1.5', memory: '5G' } } }
+    environment: { NIFI_JVM_HEAP_INIT: '2g', NIFI_JVM_HEAP_MAX: '2g' }
+    deploy: { resources: { limits: { cpus: '1.0', memory: '3G' } } }
     restart: always
   openmetadata_mysql:
-    deploy: { resources: { limits: { cpus: '1.0', memory: '2G' } } }
+    deploy: { resources: { limits: { cpus: '0.50', memory: '1.5G' } } }
     restart: always
   openmetadata_elasticsearch:
-    environment: { ES_JAVA_OPTS: "-Xms4g -Xmx4g" }
-    deploy: { resources: { limits: { cpus: '2.0', memory: '5G' } } }
+    environment: { ES_JAVA_OPTS: "-Xms2g -Xmx2g" }
+    deploy: { resources: { limits: { cpus: '1.5', memory: '3G' } } }
     restart: always
   openmetadata-server:
-    environment: { OPENMETADATA_HEAP_OPTS: "-Xmx2G -Xms2G" }
-    deploy: { resources: { limits: { cpus: '1.5', memory: '3G' } } }
+    environment: { OPENMETADATA_HEAP_OPTS: "-Xmx1G -Xms1G" }
+    deploy: { resources: { limits: { cpus: '1.0', memory: '2G' } } }
     restart: always
   
   # --- Camada Hive ---
   hive-metastore:
-    deploy: { resources: { limits: { cpus: '0.75', memory: '2G' } } }
+    deploy: { resources: { limits: { cpus: '0.50', memory: '1.5G' } } }
     restart: always
   hive-server:
-    deploy: { resources: { limits: { cpus: '1.0', memory: '3G' } } }
+    deploy: { resources: { limits: { cpus: '0.75', memory: '2G' } } }
+    restart: always
+
+  # --- Camada Query Engine (Nova Estrutura Trino) ---
+  trino-coordinator:
+    deploy: { resources: { limits: { cpus: '0.75', memory: '2G' } } }
+    restart: always
+  trino-worker:
+    deploy: { resources: { limits: { cpus: '1.0', memory: '2G' } } } # Worker com mais CPU
     restart: always
 
   # --- Outros Serviços ---
-  trino:
-    deploy: { resources: { limits: { cpus: '1.0', memory: '4G' } } }
-    restart: always
-
   superset:
-    deploy: { resources: { limits: { cpus: '0.75', memory: '3G' } } }
+    deploy: { resources: { limits: { cpus: '0.50', memory: '2G' } } }
     restart: always
   jenkins:
-    deploy: { resources: { limits: { cpus: '1.5', memory: '4G' } } }
+    deploy: { resources: { limits: { cpus: '1.0', memory: '2G' } } }
     restart: always
-
-  # NOTA: A política 'always' é crucial para simular a resiliência de produção.
