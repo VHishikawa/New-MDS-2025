@@ -50,7 +50,7 @@ services:
     container_name: minio_init
     depends_on:
       minio:
-        condition: service_started
+        condition: service_healthy
     entrypoint: >
       /bin/sh -c "
       chmod +x /scripts/init-minio.sh &&
@@ -79,7 +79,7 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
       timeout: 20s
-      start_period: 240s
+      start_period: 440s
       retries: 3
     networks:
       - mds_network
@@ -702,6 +702,7 @@ services:
       interval: 15s
       timeout: 10s
       retries: 10
+      start_period: 400s
     networks:
       - mds_network
 
@@ -921,7 +922,7 @@ services:
       retries: 10
     depends_on:
       hive-metastore:
-        condition: service_started # Trino precisa do Hive Metastore para o catálogo Hive/Iceberg
+        condition: service_completed_successfully # Trino precisa do Hive Metastore para o catálogo Hive/Iceberg
     networks:
       - mds_network
 
@@ -953,7 +954,7 @@ services:
       - ./superset/init-superset.sh:/app/superset/init-superset.sh
     depends_on:
       postgres:
-        condition: service_healthy
+        condition: service_completed_successfully
     networks:
       - mds_network
 
@@ -1159,9 +1160,9 @@ services:
       AWS_SECRET_ACCESS_KEY: datalake
     depends_on:
       postgres:
-        condition: service_healthy
+        condition: service_completed_successfully
       minio:
-        condition: service_healthy
+        condition: service_completed_successfully
     networks:
       - mds_network
 
@@ -1231,7 +1232,101 @@ services:
       - mds_network
     depends_on:
       postgres:
-        condition: service_healthy
+        condition: service_completed_successfully
+
+
+  # -----------------------------------------------------------------------------------
+  #  CAMADA DE ANÁLISE EM TEMPO REAL (Real-time Analytics)
+  # -----------------------------------------------------------------------------------
+
+  clickhouse:
+    image: clickhouse:25.7.1
+    container_name: clickhouse_server
+    hostname: clickhouse
+    ports:
+      # Porta para clientes HTTP (ex: UI, Superset, DBeaver). Mapeada para 18123 no host.
+      - "18123:8123"
+      # Porta para o cliente nativo TCP. Mapeada para 19001 para evitar conflito com MinIO.
+      - "19001:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+      # Descomente a linha abaixo se quiser usar arquivos de configuração customizados.
+      # - ./clickhouse/config.xml:/etc/clickhouse-server/config.xml
+    environment:
+      # Define a senha para o usuário 'default'. Troque se desejar.
+      - CLICKHOUSE_PASSWORD=clickhouse_pass
+      # Cria um banco de dados inicial, além do 'default' e 'system'.
+      - CLICKHOUSE_DB=analytics_db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8123/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 262144
+        hard: 262144
+    networks:
+      - mds_network
+
+
+  pinot-zookeeper:
+    image: zookeeper:3.9
+    container_name: pinot_zookeeper
+    hostname: pinot-zookeeper
+    ports:
+      # Mapeado para 2182 para não conflitar com o Zookeeper do Kafka
+      - "2182:2181"
+    volumes:
+      - pinot_zookeeper_data:/data
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    networks:
+      - mds_network
+
+  pinot-controller:
+    image: apachepinot/pinot:1.1.0
+    container_name: pinot_controller
+    hostname: pinot-controller
+    command: "StartController -zkAddress pinot-zookeeper:2181"
+    ports:
+      # Mapeado para 19099 para não conflitar com outros serviços.
+      - "19099:9000"
+    volumes:
+      - pinot_controller_data:/opt/pinot/data
+    depends_on:
+      - pinot-zookeeper
+    networks:
+      - mds_network
+
+  pinot-broker:
+    image: apachepinot/pinot:1.1.0
+    container_name: pinot_broker
+    hostname: pinot-broker
+    command: "StartBroker -zkAddress pinot-zookeeper:2181"
+    ports:
+      - "18099:8099" # Porta para queries
+    depends_on:
+      - pinot-controller
+    networks:
+      - mds_network
+
+  pinot-server:
+    image: apachepinot/pinot:1.1.0
+    container_name: pinot_server
+    hostname: pinot-server
+    command: "StartServer -zkAddress pinot-zookeeper:2181"
+    ports:
+      - "18098:8098" # Porta para GRPC
+      - "18097:8097" # Porta para Netty
+    volumes:
+      - pinot_server_data:/opt/pinot/data
+    depends_on:
+      - pinot-controller
+    networks:
+      - mds_network
 
 # =========================================================================================
 #  DEFINIÇÃO DOS VOLUMES
@@ -1270,6 +1365,11 @@ volumes:
   trino_data_worker:
   n8n_data:
   openmetadata_mysql_data:
+  clickhouse_data:
+  clickhouse_logs:
+  pinot_zookeeper_data:
+  pinot_controller_data:
+  pinot_server_data:
 # =========================================================================================
 #  DEFINIÇÃO DAS REDES
 # =========================================================================================
