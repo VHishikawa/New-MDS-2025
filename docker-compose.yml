@@ -50,7 +50,7 @@ services:
     container_name: minio_init
     depends_on:
       minio:
-        condition: service_healthy
+        condition: service_started
     entrypoint: >
       /bin/sh -c "
       chmod +x /scripts/init-minio.sh &&
@@ -79,7 +79,7 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
       timeout: 20s
-      start_period: 440s
+      start_period: 240s
       retries: 3
     networks:
       - mds_network
@@ -702,7 +702,6 @@ services:
       interval: 15s
       timeout: 10s
       retries: 10
-      start_period: 400s
     networks:
       - mds_network
 
@@ -922,7 +921,7 @@ services:
       retries: 10
     depends_on:
       hive-metastore:
-        condition: service_completed_successfully # Trino precisa do Hive Metastore para o catálogo Hive/Iceberg
+        condition: service_started # Trino precisa do Hive Metastore para o catálogo Hive/Iceberg
     networks:
       - mds_network
 
@@ -954,7 +953,7 @@ services:
       - ./superset/init-superset.sh:/app/superset/init-superset.sh
     depends_on:
       postgres:
-        condition: service_completed_successfully
+        condition: service_healthy
     networks:
       - mds_network
 
@@ -1160,9 +1159,9 @@ services:
       AWS_SECRET_ACCESS_KEY: datalake
     depends_on:
       postgres:
-        condition: service_completed_successfully
+        condition: service_healthy
       minio:
-        condition: service_completed_successfully
+        condition: service_healthy
     networks:
       - mds_network
 
@@ -1189,51 +1188,6 @@ services:
         condition: service_started
     networks:
       - mds_network
-
-# -----------------------------------------------------------------------------------
-#  CAMADA DE AUTOMAÇÃO E INTEGRAÇÃO (Automation & Integration)
-# -----------------------------------------------------------------------------------
-
-  n8n:
-    image: docker.n8n.io/n8nio/n8n:1.46.0 # Usar uma versão específica é uma boa prática
-    container_name: n8n_automation
-    hostname: n8n
-    ports:
-      - "5678:5678"
-    environment:
-      # --- Configuração do Banco de Dados (PostgreSQL) ---
-      - DB_TYPE=postgresdb
-      - DB_POSTGRESDB_HOST=postgres_db
-      - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_DATABASE=n8n_db
-      - DB_POSTGRESDB_USER=airflow
-      - DB_POSTGRESDB_PASSWORD=airflow
-
-      # --- Configuração Geral e de Segurança (MUITO IMPORTANTE) ---
-      # ATENÇÃO: Gere uma chave aleatória longa e segura para esta variável!
-      # Não use a chave de exemplo em produção.
-      - N8N_ENCRYPTION_KEY=SUA_CHAVE_DE_CRIPTOGRAFIA_SECRETA_E_LONGA
-      
-      # Define o fuso horário para os agendamentos (CRON)
-      - GENERIC_TIMEZONE=America/Sao_Paulo
-
-      # Define a URL pública do N8N para que os webhooks sejam gerados corretamente
-      - WEBHOOK_URL=http://localhost:5678/
-
-      # --- Otimização de Execuções ---
-      # Habilita a remoção automática de logs de execuções antigas
-      - EXECUTIONS_DATA_PRUNE=true
-      # Mantém os dados de execuções por 30 dias
-      - EXECUTIONS_DATA_MAX_AGE=30
-
-    volumes:
-      - n8n_data:/home/node/.n8n
-    networks:
-      - mds_network
-    depends_on:
-      postgres:
-        condition: service_completed_successfully
-
 
   # -----------------------------------------------------------------------------------
   #  CAMADA DE ANÁLISE EM TEMPO REAL (Real-time Analytics)
@@ -1327,6 +1281,49 @@ services:
       - pinot-controller
     networks:
       - mds_network
+# -----------------------------------------------------------------------------------
+#  CAMADA DE AUTOMAÇÃO E INTEGRAÇÃO (Automation & Integration)
+# -----------------------------------------------------------------------------------
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:1.46.0 # Usar uma versão específica é uma boa prática
+    container_name: n8n_automation
+    hostname: n8n
+    ports:
+      - "5678:5678"
+    environment:
+      # --- Configuração do Banco de Dados (PostgreSQL) ---
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres_db
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n_db
+      - DB_POSTGRESDB_USER=airflow
+      - DB_POSTGRESDB_PASSWORD=airflow
+
+      # --- Configuração Geral e de Segurança (MUITO IMPORTANTE) ---
+      # ATENÇÃO: Gere uma chave aleatória longa e segura para esta variável!
+      # Não use a chave de exemplo em produção.
+      - N8N_ENCRYPTION_KEY=SUA_CHAVE_DE_CRIPTOGRAFIA_SECRETA_E_LONGA
+      
+      # Define o fuso horário para os agendamentos (CRON)
+      - GENERIC_TIMEZONE=America/Sao_Paulo
+
+      # Define a URL pública do N8N para que os webhooks sejam gerados corretamente
+      - WEBHOOK_URL=http://localhost:5678/
+
+      # --- Otimização de Execuções ---
+      # Habilita a remoção automática de logs de execuções antigas
+      - EXECUTIONS_DATA_PRUNE=true
+      # Mantém os dados de execuções por 30 dias
+      - EXECUTIONS_DATA_MAX_AGE=30
+
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - mds_network
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 # =========================================================================================
 #  DEFINIÇÃO DOS VOLUMES
