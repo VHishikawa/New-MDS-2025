@@ -61,7 +61,7 @@ services:
   kafka-connect:
     deploy: { resources: { limits: { cpus: '0.25', memory: '512M' } } }
     restart: unless-stopped
-  kafka-control-center: # É pesado, mas pode ser acessado com menos recursos
+  kafka-control-center:
     deploy: { resources: { limits: { cpus: '0.25', memory: '512M' } } }
     restart: unless-stopped
   flink-jobmanager:
@@ -75,19 +75,19 @@ services:
 
   # --- Camada de Ingestão e Governança (Serviços Pesados) ---
   nifi:
-    environment: { NIFI_JVM_HEAP_INIT: '1g', NIFI_JVM_HEAP_MAX: '1.5g' } # Heap de 1.5G
-    deploy: { resources: { limits: { cpus: '1.0', memory: '2G' } } } # Limite Docker de 2G
+    environment: { NIFI_JVM_HEAP_INIT: '1g', NIFI_JVM_HEAP_MAX: '1.5g' }
+    deploy: { resources: { limits: { cpus: '1.0', memory: '2G' } } }
     restart: unless-stopped
   openmetadata_mysql:
     deploy: { resources: { limits: { cpus: '0.25', memory: '1G' } } }
     restart: unless-stopped
   openmetadata_elasticsearch:
-    environment: { ES_JAVA_OPTS: "-Xms1g -Xmx1g" } # Heap de 1G
-    deploy: { resources: { limits: { cpus: '1.0', memory: '2G' } } } # Limite Docker de 2G
+    environment: { ES_JAVA_OPTS: "-Xms1g -Xmx1g" }
+    deploy: { resources: { limits: { cpus: '1.0', memory: '2G' } } }
     restart: unless-stopped
   openmetadata-server:
-    environment: { OPENMETADATA_HEAP_OPTS: "-Xmx1G -Xms1G" } # Heap de 1G
-    deploy: { resources: { limits: { cpus: '0.50', memory: '1.5G' } } } # Limite Docker de 1.5G
+    environment: { OPENMETADATA_HEAP_OPTS: "-Xmx1G -Xms1G" }
+    deploy: { resources: { limits: { cpus: '0.50', memory: '1.5G' } } }
     restart: unless-stopped
   ingestion:
     deploy: { resources: { limits: { cpus: '0.25', memory: '512M' } } }
@@ -105,14 +105,14 @@ services:
   superset:
     deploy: { resources: { limits: { cpus: '0.50', memory: '1.5G' } } }
     restart: unless-stopped
-  kibana: # Leve, pois só visualiza dados do Elasticsearch
+  kibana:
     deploy: { resources: { limits: { cpus: '0.10', memory: '256M' } } }
     restart: unless-stopped
   dbeaver:
     deploy: { resources: { limits: { cpus: '0.10', memory: '512M' } } }
     restart: unless-stopped
   notebook-spark:
-    deploy: { resources: { limits: { cpus: '0.25', memory: '256M' } } } # O container é leve, a carga vai pro Spark
+    deploy: { resources: { limits: { cpus: '0.25', memory: '256M' } } }
     restart: unless-stopped
   
   # --- Camada de CI/CD e Monitoramento ---
@@ -131,10 +131,19 @@ services:
     deploy: { resources: { limits: { cpus: '0.25', memory: '512M' } } }
     restart: unless-stopped
 
-  # --- Camada Query Engine (Nova Estrutura Trino) ---
+  # --- Camada Query Engine (Estrutura Trino Padronizada) ---
   trino-coordinator:
-    deploy: { resources: { limits: { cpus: '0.50', memory: '1G' } } }
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: '1G'
     restart: unless-stopped
   trino-worker:
-    deploy: { resources: { limits: { cpus: '0.50', memory: '1G' } } }
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: '1G'
     restart: unless-stopped

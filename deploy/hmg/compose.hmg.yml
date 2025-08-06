@@ -89,18 +89,28 @@ services:
     deploy: { resources: { limits: { cpus: '0.75', memory: '2G' } } }
     restart: always
 
-  # --- Camada Query Engine (Nova Estrutura Trino) ---
-  trino-coordinator:
-    deploy: { resources: { limits: { cpus: '0.75', memory: '2G' } } }
-    restart: always
-  trino-worker:
-    deploy: { resources: { limits: { cpus: '1.0', memory: '2G' } } } # Worker com mais CPU
-    restart: always
-
   # --- Outros Serviços ---
   superset:
     deploy: { resources: { limits: { cpus: '0.50', memory: '2G' } } }
     restart: always
   jenkins:
     deploy: { resources: { limits: { cpus: '1.0', memory: '2G' } } }
+    restart: always
+    
+  # --- Camada Query Engine (Estrutura Trino Padronizada) ---
+  trino-coordinator:
+    deploy:
+      resources:
+        limits:
+          cpus: '0.75'
+          memory: '2G'
+    restart: always
+
+  trino-worker:
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: '2G'
     restart: always

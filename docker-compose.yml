@@ -50,7 +50,7 @@ services:
     container_name: minio_init
     depends_on:
       minio:
-        condition: service_started
+        condition: service_healthy
     entrypoint: >
       /bin/sh -c "
       chmod +x /scripts/init-minio.sh &&
@@ -76,7 +76,7 @@ services:
     volumes:
       - minio_data:/data # Volume para persistir os dados do MinIO
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "mc", "ready", "host"]
       interval: 30s
       timeout: 20s
       start_period: 240s

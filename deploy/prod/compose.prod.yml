@@ -1,5 +1,5 @@
 # compose.prod.yml
-# Override para a VM de Produção (72GB RAM, 10 vCPUs)
+# Override para a VM de Produção (Especificação da VM precisa ser validada)
 version: "3.8"
 
 services:
@@ -89,13 +89,28 @@ services:
     restart: always
 
   # --- Outros Serviços ---
-  trino:
-    deploy: { resources: { limits: { cpus: '1.5', memory: '8G' } } }
-    restart: always
-
   superset:
     deploy: { resources: { limits: { cpus: '1.0', memory: '4G' } } }
     restart: always
   jenkins:
     deploy: { resources: { limits: { cpus: '2.0', memory: '8G' } } }
+    restart: always
+
+  # --- Camada Query Engine (Estrutura Trino CORRIGIDA e Padronizada) ---
+  trino-coordinator:
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5' # Coordenador não precisa de tanta CPU
+          memory: '4G'  # Mas precisa de memória para planejar queries
+    restart: always
+
+  trino-worker:
+    deploy:
+      # Para escalar, basta aumentar o número de réplicas aqui
+      replicas: 1 
+      resources:
+        limits:
+          cpus: '1.0'   # Worker faz o trabalho pesado, então mais CPU
+          memory: '4G'  # E memória para processar os dados
     restart: always
