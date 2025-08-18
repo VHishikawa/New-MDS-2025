@@ -4,6 +4,39 @@ version: '3.8'
 
 services:
 
+  # =========================================================================================
+  #  CAMADA DE GATEWAY / PROXY REVERSO
+  # =========================================================================================
+  nginx:
+    image: nginx:1.27
+    container_name: nginx_reverse_proxy
+    ports:
+      - "80:80" 
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - mds_network
+    depends_on:
+      - airflow_webserver
+      - spark-master
+      - flink-jobmanager
+      - minio
+      - neo4j_db
+      - nifi
+      - openmetadata-server
+      - superset
+      - kibana
+      - trino-coordinator
+      - dbeaver
+      - notebook-spark
+      - clickhouse
+      - pinot-controller
+      - jenkins
+      - prometheus
+      - grafana
+      - n8n
+    restart: unless-stopped   
+
   # -----------------------------------------------------------------------------------
   #  CAMADA DE ARMAZENAMENTO E CACHE (Storage, Databases & Cache)
   # -----------------------------------------------------------------------------------
@@ -50,7 +83,7 @@ services:
     container_name: minio_init
     depends_on:
       minio:
-        condition: service_healthy
+        condition: service_started
     entrypoint: >
       /bin/sh -c "
       chmod +x /scripts/init-minio.sh &&
@@ -75,12 +108,6 @@ services:
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data # Volume para persistir os dados do MinIO
-    healthcheck:
-      test: ["CMD", "mc", "ready", "host"]
-      interval: 30s
-      timeout: 20s
-      start_period: 240s
-      retries: 3
     networks:
       - mds_network
 
@@ -367,7 +394,7 @@ services:
     container_name: spark_master
     hostname: spark-master
     ports:
-      - "9090:8080" # UI do Spark Master
+      - "9091:8080" # UI do Spark Master
       - "7077:7077" # Porta do Spark Master
       - "6066:6066" # Porta para Submissão de Jobs
     volumes:
@@ -788,6 +815,8 @@ services:
         condition: service_started
       openmetadata_mysql:
         condition: service_healthy
+      airflow_init:
+        condition: service_completed_successfully
     networks:
       - mds_network
 
@@ -954,6 +983,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      airflow_init: 
+        condition: service_completed_successfully
     networks:
       - mds_network
 
@@ -1161,7 +1192,9 @@ services:
       postgres:
         condition: service_healthy
       minio:
-        condition: service_healthy
+        condition: service_started
+      airflow_init: 
+        condition: service_completed_successfully
     networks:
       - mds_network
 
@@ -1324,6 +1357,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      airflow_init: 
+        condition: service_completed_successfully
 
 # =========================================================================================
 #  DEFINIÇÃO DOS VOLUMES
@@ -1367,6 +1402,8 @@ volumes:
   pinot_zookeeper_data:
   pinot_controller_data:
   pinot_server_data:
+  npm_data:
+  npm_letsencrypt:
 # =========================================================================================
 #  DEFINIÇÃO DAS REDES
 # =========================================================================================
