@@ -701,9 +701,10 @@ services:
       - NIFI_WEB_HTTP_PORT=8080
       - NIFI_JVM_HEAP_INIT=1g
       - NIFI_JVM_HEAP_MAX=2g
-      - NIFI_WEB_PROXY_CONTEXT_PATH=/nifi
+      # - NIFI_WEB_PROXY_CONTEXT_PATH=/nifi
+      # - NIFI_WEB_PROXY_HOST=mds-server.local
     volumes:
-      - nifi_conf:/opt/nifi/nifi-current/conf
+      - ./nifi_config/conf:/opt/nifi/nifi-current/conf
       - nifi_database_repo:/opt/nifi/nifi-current/database_repository
       - nifi_flowfile_repo:/opt/nifi/nifi-current/flowfile_repository
       - nifi_content_repo:/opt/nifi/nifi-current/content_repository
@@ -832,7 +833,7 @@ services:
     container_name: openmetadata_server
     image: docker.getcollate.io/openmetadata/server:1.8.1
     environment:
-      OPENMETADATA_SERVER_URL: "http://mds-server.local/openmetadata/api"
+      OPENMETADATA_SERVER_URL: "http://mds-server.local/openmetadata"
       OPENMETADATA_CLUSTER_NAME: "openmetadata"
       SERVER_PORT: 8585
       SERVER_ADMIN_PORT: 8586
@@ -931,9 +932,8 @@ services:
     container_name: kibana
     ports:
       - "5601:5601"
-    environment:
-      ELASTICSEARCH_HOSTS: '["http://openmetadata_elasticsearch:9200"]'
-      SERVER_PUBLIC_BASEURL: "/kibana"
+    volumes:
+      - ./kibana_config/kibana.yml:/usr/share/kibana/config/kibana.yml
     depends_on:
       openmetadata_elasticsearch:
         condition: service_started
@@ -1144,7 +1144,8 @@ services:
       - mds_network
     environment:
       # AJUSTE: Informa ao Grafana qual é a sua URL raiz
-      GF_SERVER_ROOT_URL: "http://mds-server.local/grafana"
+      - GF_SERVER_ROOT_URL=http://mds-server.local/grafana
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
 
   node-exporter:
     image: prom/node-exporter:v1.8.1
@@ -1362,10 +1363,9 @@ services:
 
       # Define a URL pública do N8N para que os webhooks sejam gerados corretamente
       - WEBHOOK_URL=http://mds-server.local/n8n/
-
-      # --- Otimização de Execuções ---
-      # Habilita a remoção automática de logs de execuções antigas
+      - N8N_PATH=/n8n/
       - EXECUTIONS_DATA_PRUNE=true
+      - N8N_SECURE_COOKIE=false
       # Mantém os dados de execuções por 30 dias
       - EXECUTIONS_DATA_MAX_AGE=30
 

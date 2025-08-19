@@ -8,6 +8,7 @@ from celery.schedules import crontab
 # Mantém as suas configurações originais que estão corretas.
 SQLALCHEMY_DATABASE_URI = os.environ.get("SUPERSET_DATABASE_URI")
 SECRET_KEY = os.environ.get("SUPERSET_SECRET_KEY")
+# HTTP_HEADERS = {'X-Forwarded-Prefix': '/superset'}
 
 # --- MELHORIA 1: HABILITAR CACHE COM REDIS ---
 # Para um ganho massivo de performance em dashboards.
