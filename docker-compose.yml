@@ -105,6 +105,7 @@ services:
     environment:
       MINIO_ROOT_USER: admin
       MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_BROWSER_REDIRECT_URL: http://mds-server.local/minio
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data # Volume para persistir os dados do MinIO
@@ -175,6 +176,7 @@ services:
       SPARK_CONF_DIR: /tmp/spark_conf
       SPARK_LOCAL_DIRS: /tmp/spark-temp
       # Adicionando variáveis para conexão com MinIO
+      AIRFLOW__WEBSERVER__BASE_URL: http://mds-server.local/airflow
       AWS_ACCESS_KEY_ID: datalake
       AWS_SECRET_ACCESS_KEY: datalake
       AWS_ENDPOINT_URL: http://minio:9000
@@ -228,6 +230,7 @@ services:
       SPARK_HOME: /opt/spark
       SPARK_CONF_DIR: /tmp/spark_conf
       SPARK_LOCAL_DIRS: /tmp/spark-temp
+      AIRFLOW__WEBSERVER__BASE_URL: http://mds-server.local/airflow
       # Adicionando variáveis para conexão com MinIO
       AWS_ACCESS_KEY_ID: datalake
       AWS_SECRET_ACCESS_KEY: datalake
@@ -278,6 +281,7 @@ services:
       SPARK_HOME: /opt/spark
       SPARK_CONF_DIR: /tmp/spark_conf
       SPARK_LOCAL_DIRS: /tmp/spark-temp
+      AIRFLOW__WEBSERVER__BASE_URL: http://mds-server.local/airflow
       # Adicionando variáveis para conexão com MinIO
       AWS_ACCESS_KEY_ID: datalake
       AWS_SECRET_ACCESS_KEY: datalake
@@ -412,6 +416,9 @@ services:
       AWS_ACCESS_KEY_ID: datalake
       AWS_SECRET_ACCESS_KEY: datalake
       AWS_ENDPOINT_URL: http://minio:9000
+      SPARK_OPTS: >-
+        -Dspark.ui.reverseProxy=true
+        -Dspark.ui.reverseProxyUrl=http://mds-server.local/spark
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080"]
       interval: 10s
@@ -694,6 +701,7 @@ services:
       - NIFI_WEB_HTTP_PORT=8080
       - NIFI_JVM_HEAP_INIT=1g
       - NIFI_JVM_HEAP_MAX=2g
+      - NIFI_WEB_PROXY_CONTEXT_PATH=/nifi
     volumes:
       - nifi_conf:/opt/nifi/nifi-current/conf
       - nifi_database_repo:/opt/nifi/nifi-current/database_repository
@@ -824,6 +832,7 @@ services:
     container_name: openmetadata_server
     image: docker.getcollate.io/openmetadata/server:1.8.1
     environment:
+      OPENMETADATA_SERVER_URL: "http://mds-server.local/openmetadata/api"
       OPENMETADATA_CLUSTER_NAME: "openmetadata"
       SERVER_PORT: 8585
       SERVER_ADMIN_PORT: 8586
@@ -924,6 +933,7 @@ services:
       - "5601:5601"
     environment:
       ELASTICSEARCH_HOSTS: '["http://openmetadata_elasticsearch:9200"]'
+      SERVER_PUBLIC_BASEURL: "/kibana"
     depends_on:
       openmetadata_elasticsearch:
         condition: service_started
@@ -997,6 +1007,7 @@ services:
     environment:
       SUPERSET_SECRET_KEY: "v2qGZ1P+pSi+y5g8gT6bV7A8d1cVzRwzJ/uBw3ySgGgCq/8eK/1t"
       SUPERSET_DATABASE_URI: "postgresql+psycopg2://airflow:airflow@postgres_db:5432/superset_pg_db"
+      ENABLE_PROXY_FIX: "true"
     volumes:
       - ./superset/superset_config.py:/app/pythonpath/superset_config.py
       - superset_data:/app/superset_home
@@ -1049,6 +1060,7 @@ services:
       - ./spark_service/events:/opt/spark-events
       - ./spark_service/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
       - ./spark_service/conf/log4j2.properties:/opt/spark/conf/log4j2.properties
+      - ./spark_service/jupyter_notebook_config.py:/opt/jupyter/jupyter_notebook_config.py
     environment:
       SPARK_MASTER_URL: spark://spark-master:7077
       JUPYTER_ENABLE_LAB: "yes"
@@ -1059,6 +1071,7 @@ services:
       AWS_ACCESS_KEY_ID: datalake
       AWS_SECRET_ACCESS_KEY: datalake
       AWS_ENDPOINT_URL: http://minio:9000
+      JUPYTER_CONFIG_DIR: /opt/jupyter/
     entrypoint: ["python", "-m", "jupyterlab", "--ip=0.0.0.0", "--port=8888", "--allow-root"]
     depends_on:
       spark-master:
@@ -1083,6 +1096,8 @@ services:
     ports:
       - "8085:8080"
       - "50000:50000"
+    environment:
+      - JENKINS_OPTS=--prefix=/jenkins
     volumes:
       - jenkins_data:/var/jenkins_home
       - /var/run/docker.sock:/var/run/docker.sock
@@ -1111,6 +1126,7 @@ services:
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
+      - '--web.external-url=http://mds-server.local/prometheus'
     networks:
       - mds_network
 
@@ -1126,6 +1142,9 @@ services:
       - prometheus
     networks:
       - mds_network
+    environment:
+      # AJUSTE: Informa ao Grafana qual é a sua URL raiz
+      GF_SERVER_ROOT_URL: "http://mds-server.local/grafana"
 
   node-exporter:
     image: prom/node-exporter:v1.8.1
@@ -1342,7 +1361,7 @@ services:
       - GENERIC_TIMEZONE=America/Sao_Paulo
 
       # Define a URL pública do N8N para que os webhooks sejam gerados corretamente
-      - WEBHOOK_URL=http://localhost:5678/
+      - WEBHOOK_URL=http://mds-server.local/n8n/
 
       # --- Otimização de Execuções ---
       # Habilita a remoção automática de logs de execuções antigas
