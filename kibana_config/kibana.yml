@@ -1,0 +1,14 @@
+# ./kibana_config/kibana.yml
+
+# Diz ao Kibana para escutar em todas as interfaces de rede dentro do contêiner.
+server.host: "0.0.0.0"
+
+# Define explicitamente o caminho base público.
+server.basePath: "/kibana"
+
+# ESTA É A CONFIGURAÇÃO MAIS IMPORTANTE PARA QUEBRAR O LOOP.
+# Diz ao Kibana para NÃO tentar reescrever a URL, confiando que o proxy (Nginx) já está fazendo isso.
+server.rewriteBasePath: false
+
+# Precisamos repetir a configuração do Elasticsearch aqui.
+elasticsearch.hosts: ["http://openmetadata_elasticsearch:9200"]
