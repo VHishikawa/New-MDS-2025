@@ -632,6 +632,7 @@ services:
       CONTROL_CENTER_RESERVED_PORTS: "8081,8082,8083,8088,9092,29092"
       CONTROL_CENTER_UI_AUTO_REFRESH_INTERVAL: 10000
       CONTROL_CENTER_ID: c1
+      CONTROL_CENTER_REST_ADVERTISED_URL: "http://mds-server.local/control-center" 
     depends_on:
       kafka-broker:
         condition: service_started

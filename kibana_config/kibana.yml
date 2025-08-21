@@ -8,7 +8,7 @@ server.basePath: "/kibana"
 
 # ESTA É A CONFIGURAÇÃO MAIS IMPORTANTE PARA QUEBRAR O LOOP.
 # Diz ao Kibana para NÃO tentar reescrever a URL, confiando que o proxy (Nginx) já está fazendo isso.
-server.rewriteBasePath: false
+server.rewriteBasePath: true
 
 # Precisamos repetir a configuração do Elasticsearch aqui.
 elasticsearch.hosts: ["http://openmetadata_elasticsearch:9200"]

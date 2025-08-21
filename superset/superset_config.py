@@ -1,14 +1,30 @@
-# superset/superset_config.py (Otimizado)
+# superset/superset_config.py (Versão Final Corrigida e Otimizada)
 
 import os
 from superset.utils.log import DBEventLogger
 from celery.schedules import crontab
 
-# --- CONFIGURAÇÃO BÁSICA ---
-# Mantém as suas configurações originais que estão corretas.
+# --- CONFIGURAÇÃO BÁSICA E DE PROXY ---
 SQLALCHEMY_DATABASE_URI = os.environ.get("SUPERSET_DATABASE_URI")
 SECRET_KEY = os.environ.get("SUPERSET_SECRET_KEY")
-# HTTP_HEADERS = {'X-Forwarded-Prefix': '/superset'}
+
+# --- CORREÇÃO PARA PROXY REVERSO (A PARTE MAIS IMPORTANTE) ---
+# Habilita o middleware do Flask para corrigir os cabeçalhos de proxy.
+# Isso é essencial para o Superset entender que está rodando atrás de um proxy
+# e em um subdiretório.
+ENABLE_PROXY_FIX = True
+
+# Configura o middleware para confiar nos cabeçalhos enviados pelo Nginx.
+# O 'x_prefix: 1' é o mais importante aqui, pois ele vai ler o cabeçalho
+# 'X-Forwarded-Prefix' que configuramos no Nginx.
+PROXY_FIX_CONFIG = {
+    'x_for': 1, 
+    'x_proto': 1, 
+    'x_host': 1, 
+    'x_port': 1, 
+    'x_prefix': 1
+}
+
 
 # --- MELHORIA 1: HABILITAR CACHE COM REDIS ---
 # Para um ganho massivo de performance em dashboards.
