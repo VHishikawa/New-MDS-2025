@@ -35,7 +35,7 @@
 # Eventos e logs gerados pelas aplicações Spark.
 /spark_service/events/
 
-
+/nifi_config/conf/archive/*.gz
 
 # Ignora diretórios de bibliotecas e jars do Hadoop e Hive
 /airflow_service/conf/hadoop_jars/
