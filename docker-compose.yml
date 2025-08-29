@@ -115,27 +115,37 @@ services:
       - mds_network
 
   neo4j_db:
-    image: neo4j:5 # Utiliza a série 5, que é a versão principal mais recente e estável.
-    container_name: neo4j_db
-    hostname: neo4j
-    ports:
-      - "7474:7474" # Porta da UI Web do Neo4j.
-      - "7687:7687" # Porta do protocolo Bolt para conexão de drivers.
-    environment:
-      # A imagem oficial do Neo4j espera a autenticação no formato 'usuário/senha'.
-      # O usuário padrão e obrigatório é 'neo4j'.
-      NEO4J_AUTH: neo4j/admin123
-    volumes:
-      - neo4j_data:/data # Volume para persistir os dados do grafo.
-      - neo4j_logs:/logs # Volume para os logs.
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:7474 || exit 1"]
-      interval: 20s
-      timeout: 10s
-      retries: 5
-      start_period: 240s
-    networks:
-      - mds_network
+      image: neo4j:5 # Utiliza a série 5, que é a versão principal mais recente e estável.
+      container_name: neo4j_db
+      hostname: neo4j
+      ports:
+        - "7474:7474" # Porta da UI Web do Neo4j.
+        - "7687:7687" # Porta do protocolo Bolt para conexão de drivers.
+      environment:
+        # Autenticação (já existente)
+        - NEO4J_AUTH=neo4j/admin123
+        
+        # [ADICIONADO] Configurações para controlar o uso de memória interna do Neo4j
+        - NEO4J_server_memory_heap_initial__size=512M
+        - NEO4J_server_memory_heap_max__size=512M
+        - NEO4J_server_memory_pagecache_size=512M
+
+      volumes:
+        - neo4j_data:/data # Volume para persistir os dados do grafo.
+        - neo4j_logs:/logs # Volume para os logs.
+      healthcheck:
+        test: ["CMD-SHELL", "curl -f http://localhost:7474 || exit 1"]
+        interval: 20s
+        timeout: 10s
+        retries: 5
+        start_period: 240s
+      networks:
+        - mds_network
+        
+      # [ADICIONADO] Limites de recursos com a sintaxe correta para docker-compose
+      mem_limit: 1.5g
+      cpus: 0.50
+      restart: unless-stopped
 
   mongodb:
     image: mongo:latest
