@@ -1,0 +1,2 @@
+Flask-AppBuilder==4.4.1
+psycopg2-binary

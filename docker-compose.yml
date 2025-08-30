@@ -992,10 +992,10 @@ services:
     networks:
       - mds_network
 
-# ... outros serviços ...
-
   superset-init:
-    image: apache/superset:4.0.0
+    # IMPORTANTE: O init também precisa usar a imagem corrigida
+    build: 
+      context: ./superset
     container_name: superset_init
     command: ["/app/superset/init-superset.sh"]
     environment:
@@ -1008,13 +1008,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      airflow_init: 
-        condition: service_completed_successfully
+      # ... outras dependências
     networks:
       - mds_network
 
   superset:
-    image: apache/superset:4.0.0
+    # A mudança principal está aqui: trocamos 'image' por 'build'
+    build: 
+      context: ./superset
     container_name: superset_app
     command: ["/usr/bin/run-server.sh"]
     ports:
@@ -1022,7 +1023,7 @@ services:
     environment:
       SUPERSET_SECRET_KEY: "v2qGZ1P+pSi+y5g8gT6bV7A8d1cVzRwzJ/uBw3ySgGgCq/8eK/1t"
       SUPERSET_DATABASE_URI: "postgresql+psycopg2://airflow:airflow@postgres_db:5432/superset_pg_db"
-      ENABLE_PROXY_FIX: "true"
+      PYTHONPATH: "/app/pythonpath"
     volumes:
       - ./superset/superset_config.py:/app/pythonpath/superset_config.py
       - superset_data:/app/superset_home
@@ -1409,6 +1410,7 @@ volumes:
   neo4j_data:
   neo4j_logs:
   superset_data:
+    driver: local
   nifi_conf:
   nifi_database_repo:
   nifi_flowfile_repo:
